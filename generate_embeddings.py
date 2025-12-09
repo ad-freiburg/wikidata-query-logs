@@ -6,7 +6,6 @@ Averages embeddings across all question variations per sample.
 
 import argparse
 import json
-import pickle
 from pathlib import Path
 
 import numpy as np
@@ -14,20 +13,29 @@ import torch
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
+from utils import validate_sample
+
 
 def load_json_samples(data_dir: Path) -> list[dict]:
-    """Load all JSON samples that have questions."""
+    """Load all JSON samples that have questions and check validity."""
     samples = []
     json_files = sorted(data_dir.glob("*.json"))
 
     print(f"Found {len(json_files)} JSON files")
 
+    validity_stats = {"total": 0, "valid": 0, "invalid_reasons": {}}
+
     for json_file in tqdm(json_files, desc="Loading samples"):
         try:
-            with open(json_file, "r", encoding="utf-8") as f:
+            with open(json_file, encoding="utf-8") as f:
                 data = json.load(f)
 
-            # Extract samples that have questions
+            validity_stats["total"] += 1
+
+            # Check validity
+            is_valid, reason = validate_sample(data)
+
+            # Only include samples that have questions
             if (
                 data
                 and "output" in data
@@ -44,10 +52,35 @@ def load_json_samples(data_dir: Path) -> list[dict]:
                         "formatted": output_data.get("formatted", ""),
                         "type": output_data.get("type", ""),
                         "error": data.get("error"),
+                        "valid": is_valid,
+                        "validity_reason": reason,
                     }
                 )
-        except:
+
+                if is_valid:
+                    validity_stats["valid"] += 1
+                else:
+                    validity_stats["invalid_reasons"][reason] = (
+                        validity_stats["invalid_reasons"].get(reason, 0) + 1
+                    )
+
+        except Exception:
             continue
+
+    # Print validity statistics
+    print("\nValidity Statistics:")
+    print(f"  Total files processed: {validity_stats['total']}")
+    print(f"  Samples with questions: {len(samples)}")
+    print(
+        f"  Valid samples: {validity_stats['valid']} ({validity_stats['valid'] / len(samples) * 100:.1f}%)"
+    )
+    print(f"  Invalid samples: {len(samples) - validity_stats['valid']}")
+    if validity_stats["invalid_reasons"]:
+        print("\n  Invalid reasons:")
+        for reason, count in sorted(
+            validity_stats["invalid_reasons"].items(), key=lambda x: x[1], reverse=True
+        ):
+            print(f"    {reason}: {count}")
 
     return samples
 
@@ -93,8 +126,12 @@ def generate_embeddings(
             sample_indices.extend([sample_idx] * len(questions))
 
         # Encode all questions in the batch at once
+        # normalize_embeddings=True: L2-normalize for cosine distance via Euclidean
         question_embeddings = model.encode(
-            all_questions, convert_to_numpy=True, show_progress_bar=False
+            all_questions,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+            normalize_embeddings=True,
         )
 
         # Average embeddings for each sample
@@ -116,6 +153,8 @@ def generate_embeddings(
                     "type": sample["type"],
                     "error": sample["error"],
                     "num_questions": len(sample["questions"]),
+                    "valid": sample["valid"],
+                    "validity_reason": sample["validity_reason"],
                 }
             )
 
@@ -127,26 +166,30 @@ def generate_embeddings(
     return embeddings, metadata_list
 
 
-def save_results(embeddings: np.ndarray, metadata: list[dict], output_dir: Path):
-    """Save embeddings and metadata to disk."""
+def save_results(
+    embeddings: np.ndarray, metadata: list[dict], output_dir: Path, model_name: str
+) -> None:
+    """Save embeddings as numpy array and metadata to disk."""
     output_dir.mkdir(exist_ok=True, parents=True)
 
     # Save embeddings as numpy array
+    print("\nSaving embeddings...")
     embeddings_path = output_dir / "embeddings.npy"
     np.save(embeddings_path, embeddings)
     print(f"Saved embeddings to {embeddings_path}")
 
-    # Save metadata as pickle
-    metadata_path = output_dir / "metadata.pkl"
-    with open(metadata_path, "wb") as f:
-        pickle.dump(metadata, f)
+    # Save metadata as JSON
+    metadata_path = output_dir / "metadata.json"
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
     print(f"Saved metadata to {metadata_path}")
 
     # Save a summary JSON
     summary = {
         "num_samples": len(embeddings),
         "embedding_dim": embeddings.shape[1],
-        "model": "Qwen/Qwen3-Embedding-0.6B",
+        "model": model_name,
+        "normalized": True,
     }
 
     summary_path = output_dir / "summary.json"
@@ -155,7 +198,7 @@ def save_results(embeddings: np.ndarray, metadata: list[dict], output_dir: Path)
     print(f"Saved summary to {summary_path}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate embeddings for Wikidata query-SPARQL samples"
     )
@@ -174,20 +217,21 @@ def main():
     parser.add_argument(
         "--input-dir",
         type=str,
-        default="organic-qwen3-next-80b-a3b",
-        help="Input directory containing JSON files (default: organic-qwen3-next-80b-a3b)",
+        default="data/organic-qwen3-next-80b-a3b",
+        help="Input directory containing JSON files (default: "
+        "data/organic-qwen3-next-80b-a3b)",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="embeddings_output",
-        help="Output directory for embeddings (default: embeddings_output)",
+        default=None,
+        help="Output directory for embeddings (default: <input-dir>/embeddings)",
     )
 
     args = parser.parse_args()
 
     data_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else data_dir / "embeddings"
 
     # Load samples
     print("Step 1: Loading JSON samples...")
@@ -206,7 +250,7 @@ def main():
 
     # Save results
     print("\nStep 3: Saving results...")
-    save_results(embeddings, metadata, output_dir)
+    save_results(embeddings, metadata, output_dir, args.model)
 
     print("\n✓ Embedding generation complete!")
 
