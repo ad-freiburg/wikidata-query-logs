@@ -49,6 +49,7 @@ def load_json_samples(data_dir: Path) -> list[dict]:
                         "file": json_file.name,
                         "questions": output_data["questions"],
                         "sparql": output_data.get("sparql", ""),
+                        "sparql_fixed": output_data.get("sparql_fixed", ""),
                         "formatted": output_data.get("formatted", ""),
                         "type": output_data.get("type", ""),
                         "error": data.get("error"),
@@ -89,7 +90,7 @@ def generate_embeddings(
     samples: list[dict],
     model_name: str = "Qwen/Qwen3-Embedding-0.6B",
     batch_size: int = 128,
-) -> tuple[np.ndarray, list[dict]]:
+) -> np.ndarray:
     """
     Generate embeddings for all samples by averaging question variations.
     Uses batching across samples for efficiency.
@@ -110,7 +111,6 @@ def generate_embeddings(
     model = SentenceTransformer(model_name, device=device, trust_remote_code=True)
 
     embeddings_list = []
-    metadata_list = []
 
     print("\nGenerating embeddings with batching...")
     for i in tqdm(range(0, len(samples), batch_size), desc="Processing batches"):
@@ -135,7 +135,7 @@ def generate_embeddings(
         )
 
         # Average embeddings for each sample
-        for sample_idx, sample in enumerate(batch):
+        for sample_idx in range(len(batch)):
             # Get embeddings for this sample's questions
             mask = [idx == sample_idx for idx in sample_indices]
             sample_embeddings = question_embeddings[mask]
@@ -144,31 +144,18 @@ def generate_embeddings(
             avg_embedding = np.mean(sample_embeddings, axis=0)
 
             embeddings_list.append(avg_embedding)
-            metadata_list.append(
-                {
-                    "file": sample["file"],
-                    "questions": sample["questions"],
-                    "sparql": sample["sparql"],
-                    "formatted": sample["formatted"],
-                    "type": sample["type"],
-                    "error": sample["error"],
-                    "num_questions": len(sample["questions"]),
-                    "valid": sample["valid"],
-                    "validity_reason": sample["validity_reason"],
-                }
-            )
 
     embeddings = np.vstack(embeddings_list)
     print(
         f"\nGenerated {len(embeddings)} embeddings of dimension {embeddings.shape[1]}"
     )
 
-    return embeddings, metadata_list
+    return embeddings
 
 
 def save_results(
     embeddings: np.ndarray,
-    metadata: list[dict],
+    samples: list[dict],
     output_dir: Path,
     model_name: str,
 ) -> None:
@@ -182,10 +169,10 @@ def save_results(
     print(f"Saved embeddings to {embeddings_path}")
 
     # Save metadata as JSON
-    metadata_path = output_dir / "metadata.json"
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-    print(f"Saved metadata to {metadata_path}")
+    samples_path = output_dir / "samples.json"
+    with open(samples_path, "w", encoding="utf-8") as f:
+        json.dump(samples, f, indent=2)
+    print(f"Saved samples to {samples_path}")
 
     # Save a summary JSON
     summary = {
@@ -248,7 +235,9 @@ def main() -> None:
     # Generate embeddings
     print("\nStep 2: Generating embeddings...")
     embeddings, metadata = generate_embeddings(
-        samples, model_name=args.model, batch_size=args.batch_size
+        samples,
+        model_name=args.model,
+        batch_size=args.batch_size,
     )
 
     # Save results

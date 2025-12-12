@@ -13,10 +13,10 @@ import numpy as np
 from umap import UMAP
 
 
-def load_embeddings_and_metadata(
+def load_embeddings_and_samples(
     embeddings_dir: Path,
 ) -> tuple[np.ndarray, list[dict], dict]:
-    """Load embeddings, metadata, and summary."""
+    """Load embeddings, samples, and summary."""
     # Load embeddings
     embeddings_path = embeddings_dir / "embeddings.npy"
     if not embeddings_path.exists():
@@ -26,17 +26,17 @@ def load_embeddings_and_metadata(
     embeddings = np.load(embeddings_path)
     print(f"Loaded {len(embeddings)} vectors, dimension {embeddings.shape[1]}")
 
-    # Load metadata
-    metadata_path = embeddings_dir / "metadata.json"
-    with open(metadata_path, encoding="utf-8") as f:
-        metadata = json.load(f)
+    # Load samples
+    samples_path = embeddings_dir / "samples.json"
+    with open(samples_path, encoding="utf-8") as f:
+        samples = json.load(f)
 
     # Load summary
     summary_path = embeddings_dir / "summary.json"
     with open(summary_path, encoding="utf-8") as f:
         summary = json.load(f)
 
-    return embeddings, metadata, summary
+    return embeddings, samples, summary
 
 
 def cluster_hdbscan(
@@ -223,12 +223,12 @@ def main() -> None:
 
     embeddings_dir = Path(args.embeddings_dir)
 
-    # Load embeddings and metadata
-    print("Step 1: Loading embeddings and metadata...")
-    embeddings, metadata, summary = load_embeddings_and_metadata(embeddings_dir)
+    # Load embeddings and samples
+    print("Step 1: Loading embeddings and samples...")
+    embeddings, samples, summary = load_embeddings_and_samples(embeddings_dir)
 
-    # Create valid mask from metadata
-    valid_mask = np.array([sample["valid"] for sample in metadata], dtype=bool)
+    # Create valid mask from samples
+    valid_mask = np.array([sample["valid"] for sample in samples], dtype=bool)
     print(
         f"\nValid samples: {valid_mask.sum()} / {len(valid_mask)} ({valid_mask.sum() / len(valid_mask) * 100:.1f}%)"
     )

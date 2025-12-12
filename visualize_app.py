@@ -52,12 +52,12 @@ def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
 def load_data(
     embeddings_dir: str,
 ) -> tuple[list[dict], list[int], list[list[float]], dict]:
-    """Load metadata, cluster labels, UMAP coordinates, and statistics."""
+    """Load samples, cluster labels, UMAP coordinates, and statistics."""
     embeddings_path = Path(embeddings_dir)
 
-    # Load metadata
-    with open(embeddings_path / "metadata.json") as f:
-        metadata = json.load(f)
+    # Load samples
+    with open(embeddings_path / "samples.json") as f:
+        samples = json.load(f)
 
     # Load cluster labels
     with open(embeddings_path / "cluster_labels.json") as f:
@@ -71,18 +71,18 @@ def load_data(
     with open(embeddings_path / "cluster_stats.json") as f:
         stats = json.load(f)
 
-    return metadata, labels, coords, stats
+    return samples, labels, coords, stats
 
 
-def compute_validity_stats(metadata: list[dict]) -> dict:
-    """Compute validity statistics from metadata."""
+def compute_validity_stats(samples: list[dict]) -> dict:
+    """Compute validity statistics from samples."""
     stats = {
-        "total": len(metadata),
+        "total": len(samples),
         "valid": 0,
         "invalid_reasons": {},
     }
 
-    for sample in metadata:
+    for sample in samples:
         if sample.get("valid", False):
             stats["valid"] += 1
         else:
@@ -95,13 +95,15 @@ def compute_validity_stats(metadata: list[dict]) -> dict:
 
 
 def create_dataframe(
-    metadata: list[dict], labels: list[int], coords: list[list[float]]
+    samples: list[dict],
+    labels: list[int],
+    coords: list[list[float]],
 ) -> pd.DataFrame:
     """Create DataFrame for visualization."""
     data = []
 
     for i, (sample, label, coord) in enumerate(
-        zip(metadata, labels, coords, strict=True)
+        zip(samples, labels, coords, strict=True)
     ):
         first_question = sample["questions"][0] if sample["questions"] else ""
 
@@ -112,7 +114,7 @@ def create_dataframe(
                 "x": coord[0],
                 "y": coord[1],
                 "first_question": first_question,
-                "num_questions": sample["num_questions"],
+                "num_questions": len(sample["questions"]),
                 "sparql": sample.get("sparql", "")[:100] + "..."
                 if sample.get("sparql", "")
                 else "",
@@ -140,7 +142,7 @@ def main() -> None:
 
     # Load data
     try:
-        metadata, labels, coords, cluster_stats = load_data(embeddings_dir)
+        samples, labels, coords, cluster_stats = load_data(embeddings_dir)
     except FileNotFoundError as e:
         st.error(f"Error loading data: {e}")
         st.info(
@@ -151,20 +153,22 @@ def main() -> None:
         return
 
     # Create DataFrame
-    df = create_dataframe(metadata, labels, coords)
+    df = create_dataframe(samples, labels, coords)
 
     # Compute validity statistics
-    validity_stats = compute_validity_stats(metadata)
+    validity_stats = compute_validity_stats(samples)
 
     # Sidebar filters
     st.sidebar.header("Filters")
 
-    # Cluster filter with counts
+    # Cluster filter with counts (top 100 largest clusters only)
     cluster_counts = df["cluster"].value_counts().to_dict()
     # Sort by count (descending), then by cluster ID
     cluster_options_sorted = sorted(
         cluster_counts.keys(), key=lambda x: (-cluster_counts[x], x)
     )
+    # Limit to top 100 largest clusters
+    cluster_options_sorted = cluster_options_sorted[:100]
     cluster_options_with_counts = [
         f"{cluster} ({cluster_counts[cluster]} samples)"
         for cluster in cluster_options_sorted
@@ -186,7 +190,7 @@ def main() -> None:
     )
 
     # Apply filters
-    filtered_df = df.copy()
+    filtered_df = df
 
     if selected_clusters:
         filtered_df = filtered_df[filtered_df["cluster"].isin(selected_clusters)]
@@ -216,9 +220,19 @@ def main() -> None:
     plot_df = filtered_df.copy()
     plot_df["cluster_str"] = plot_df["cluster"].astype(str)
 
+    # Subsample for plotting if too many points
+    MAX_PLOT_POINTS = 1000
+    if len(plot_df) > MAX_PLOT_POINTS:
+        plot_df_sampled = plot_df.sample(n=MAX_PLOT_POINTS, random_state=42)
+        st.info(
+            f"ℹ️ Only showing {MAX_PLOT_POINTS:,} of {len(plot_df):,} points for performance"
+        )
+    else:
+        plot_df_sampled = plot_df
+
     # Create scatter plot with distinct colors
     fig = px.scatter(
-        plot_df,
+        plot_df_sampled,
         x="x",
         y="y",
         color="cluster_str",
@@ -276,34 +290,19 @@ def main() -> None:
             if sizes:
                 sorted_sizes = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
 
-                # Create tables for largest and smallest clusters
+                # Create table for largest clusters
                 largest_data = []
-                smallest_data = []
 
                 for cluster_id, count in sorted_sizes[:5]:
                     largest_data.append({"Cluster": cluster_id, "Samples": count})
 
-                if len(sorted_sizes) > 5:
-                    for cluster_id, count in sorted_sizes[-5:]:
-                        smallest_data.append({"Cluster": cluster_id, "Samples": count})
-
-                # Display tables side by side
-                table_col1, table_col2 = st.columns(2)
-                with table_col1:
-                    st.write("**Largest Clusters:**")
-                    st.dataframe(
-                        pd.DataFrame(largest_data),
-                        hide_index=True,
-                        use_container_width=True,
-                    )
-                with table_col2:
-                    if smallest_data:
-                        st.write("**Smallest Clusters:**")
-                        st.dataframe(
-                            pd.DataFrame(smallest_data),
-                            hide_index=True,
-                            use_container_width=True,
-                        )
+                # Display largest clusters table
+                st.write("**Largest Clusters:**")
+                st.dataframe(
+                    pd.DataFrame(largest_data),
+                    hide_index=True,
+                    use_container_width=True,
+                )
 
     with col2:
         st.subheader("Validity Breakdown")
@@ -337,58 +336,31 @@ def main() -> None:
     # Sample details
     st.header("Sample Details")
 
-    # Create dropdown options with "idx: question" format (filtered by validity)
-    dropdown_options = {}
-    for idx, row in filtered_df.iterrows():
-        question = row["first_question"]
-        # Truncate long questions
-        if len(question) > 80:
-            question = question[:77] + "..."
-        dropdown_options[f"{idx}: {question}"] = idx
-
-    if not dropdown_options:
+    if len(filtered_df) == 0:
         st.warning("No samples match the current filters.")
         return
 
     # Random sample button
-    col_select, col_random = st.columns([4, 1])
-    with col_random:
-        if st.button("🎲 Random", use_container_width=True):
-            random_idx = random.choice(list(dropdown_options.values()))
-            st.session_state["selected_index"] = random_idx
+    if st.button("🎲 Random Sample", use_container_width=False):
+        # Use filtered_df for random selection (all filtered data, not just subsampled)
+        random_idx = random.choice(filtered_df.index.tolist())
+        st.session_state["selected_index"] = random_idx
 
-    # Get default value from session state or use 0
-    default_idx = st.session_state.get("selected_index", 0)
-    # If default is not in filtered options, use first available
-    if default_idx not in dropdown_options.values():
-        default_idx = list(dropdown_options.values())[0]
-
-    default_label = None
-    for label, idx in dropdown_options.items():
-        if idx == default_idx:
-            default_label = label
-            break
-    if default_label is None:
-        default_label = list(dropdown_options.keys())[0]
-
-    # Sample selector dropdown
-    with col_select:
-        selected_label = st.selectbox(
-            "Select Sample",
-            options=list(dropdown_options.keys()),
-            index=list(dropdown_options.keys()).index(default_label),
-            label_visibility="collapsed",
-        )
-    sample_index = dropdown_options[selected_label]
+    # Get sample index from session state or use first available
+    sample_index = st.session_state.get("selected_index", filtered_df.index[0])
+    # If selected index not in filtered data, use first available
+    if sample_index not in filtered_df.index:
+        sample_index = filtered_df.index[0]
 
     # Display selected sample
-    sample = metadata[sample_index]
+    sample = samples[sample_index]
     sample_row = df.iloc[sample_index]
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Cluster", sample_row["cluster"])
-    col2.metric("Valid", "✅" if sample_row["valid"] else "❌")
-    col3.metric("Num Questions", sample_row["num_questions"])
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Sample ID", sample_index)
+    col2.metric("Cluster", sample_row["cluster"])
+    col3.metric("Valid", "✅" if sample_row["valid"] else "❌")
+    col4.metric("Num Questions", sample_row["num_questions"])
 
     # Show invalid reason if sample is invalid
     if not sample_row["valid"]:
