@@ -29,7 +29,7 @@ def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
 
     # Extract SPARQL query
     sparql_match = re.search(
-        r"SPARQL query[^\n]*:\n(.*?)(?=\n\nUsing entities:|\n\nExecution result:|\Z)",
+        r"SPARQL query[^\n]*:\n(.*?)(?=\n\nUsing entities:|\n\nUsing properties:|\n\nExecution result:|\Z)",
         formatted_text,
         re.DOTALL,
     )
@@ -38,7 +38,7 @@ def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
 
     # Extract rest (everything after SPARQL)
     rest_match = re.search(
-        r"SPARQL query[^\n]*:.*?\n\n((?:Using entities:|Execution result:).*)",
+        r"SPARQL query[^\n]*:.*?\n\n((?:Using entities:|Using properties:|Execution result:).*)",
         formatted_text,
         re.DOTALL,
     )

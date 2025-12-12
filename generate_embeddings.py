@@ -167,7 +167,10 @@ def generate_embeddings(
 
 
 def save_results(
-    embeddings: np.ndarray, metadata: list[dict], output_dir: Path, model_name: str
+    embeddings: np.ndarray,
+    metadata: list[dict],
+    output_dir: Path,
+    model_name: str,
 ) -> None:
     """Save embeddings as numpy array and metadata to disk."""
     output_dir.mkdir(exist_ok=True, parents=True)

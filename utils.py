@@ -37,21 +37,24 @@ def validate_sample(data: dict) -> tuple[bool, str]:
 
     output_data = data["output"]
 
-    # Check if type is "cancel"
+    # Explicit cancel is not a fail
     if output_data.get("type") == "cancel":
-        return False, "type_is_cancel"
+        return True, "cancelled"
 
     # Check if questions field exists and has content
     if "questions" not in output_data or not output_data["questions"]:
         return False, "no_questions"
 
     # Check if formatted result indicates SPARQL execution failure
-    formatted = output_data.get("formatted", "")
+    formatted = output_data.get("sparql_result", output_data.get("formatted", ""))
     if formatted and "SPARQL execution failed" in formatted:
-        return False, "sparql_execution_failed"
+        return False, "sparql_execution_failed (execution)"
+
+    if formatted and "Error executing SPARQL query over" in formatted:
+        return False, "sparql_execution_failed (preprocessing)"
 
     # Check if result is empty (Got 0 rows)
-    if formatted and "Got 0 rows" in formatted:
+    if formatted and "Got no rows" in formatted:
         return False, "empty_result"
 
     return True, "valid"
