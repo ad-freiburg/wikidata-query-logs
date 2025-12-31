@@ -23,7 +23,13 @@ def load_json_samples(data_dir: Path) -> list[dict]:
 
     print(f"Found {len(json_files)} JSON files")
 
-    validity_stats = {"total": 0, "valid": 0, "invalid_reasons": {}}
+    validity_stats = {
+        "total": 0,
+        "none": 0,
+        "error": 0,
+        "valid": 0,
+        "invalid_reasons": {},
+    }
 
     for json_file in tqdm(json_files, desc="Loading samples"):
         try:
@@ -35,7 +41,12 @@ def load_json_samples(data_dir: Path) -> list[dict]:
             # Check validity
             is_valid, reason = validate_sample(data)
 
-            # Only include samples that have questions
+            if is_valid:
+                validity_stats["valid"] += 1
+            else:
+                cur = validity_stats["invalid_reasons"].get(reason, 0)
+                validity_stats["invalid_reasons"][reason] = cur + 1
+
             if (
                 data
                 and "output" in data
@@ -57,13 +68,6 @@ def load_json_samples(data_dir: Path) -> list[dict]:
                         "validity_reason": reason,
                     }
                 )
-
-                if is_valid:
-                    validity_stats["valid"] += 1
-                else:
-                    validity_stats["invalid_reasons"][reason] = (
-                        validity_stats["invalid_reasons"].get(reason, 0) + 1
-                    )
 
         except Exception:
             continue
@@ -234,7 +238,7 @@ def main() -> None:
 
     # Generate embeddings
     print("\nStep 2: Generating embeddings...")
-    embeddings, metadata = generate_embeddings(
+    embeddings = generate_embeddings(
         samples,
         model_name=args.model,
         batch_size=args.batch_size,
@@ -242,7 +246,7 @@ def main() -> None:
 
     # Save results
     print("\nStep 3: Saving results...")
-    save_results(embeddings, metadata, output_dir, args.model)
+    save_results(embeddings, samples, output_dir, args.model)
 
     print("\n✓ Embedding generation complete!")
 

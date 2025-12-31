@@ -3,7 +3,7 @@ Utility functions for working with Wikidata query-SPARQL samples.
 """
 
 
-def validate_sample(data: dict) -> tuple[bool, str]:
+def validate_sample(data: dict | None) -> tuple[bool, str]:
     """
     Check if a sample is valid according to VALIDITY_RULES.md
 
@@ -28,8 +28,9 @@ def validate_sample(data: dict) -> tuple[bool, str]:
         return False, "null_json"
 
     # Check if error field is not null
-    if data.get("error") is not None:
-        return False, "error_field_not_null"
+    err = data.get("error")
+    if err is not None:
+        return False, f"error_field_not_null (reason={err['reason']})"
 
     # Check if output field exists and is not null
     if "output" not in data or data["output"] is None:
