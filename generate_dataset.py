@@ -88,7 +88,7 @@ def load_json_samples(input_file: Path, data_dir: Path) -> list[dict]:
     if len(samples) > 0:
         valid_with_questions = sum(1 for s in samples if s["valid"])
         invalid_with_questions = len(samples) - valid_with_questions
-        print(f"\n  Samples WITH questions:")
+        print("\n  Samples WITH questions:")
         print(
             f"    Valid: {valid_with_questions} ({valid_with_questions / len(samples) * 100:.1f}%)"
         )
@@ -99,7 +99,9 @@ def load_json_samples(input_file: Path, data_dir: Path) -> list[dict]:
             for s in samples:
                 if not s["valid"]:
                     reason = s["validity_reason"]
-                    reasons_with_questions[reason] = reasons_with_questions.get(reason, 0) + 1
+                    reasons_with_questions[reason] = (
+                        reasons_with_questions.get(reason, 0) + 1
+                    )
             print("    Invalid reasons:")
             for reason, count in sorted(
                 reasons_with_questions.items(), key=lambda x: x[1], reverse=True
@@ -108,11 +110,14 @@ def load_json_samples(input_file: Path, data_dir: Path) -> list[dict]:
 
     # Statistics for samples WITHOUT questions
     if no_output_reasons:
-        print(f"\n  Samples WITHOUT questions (reasons):")
+        print("\n  Samples WITHOUT questions (reasons):")
         for reason, count in sorted(
             no_output_reasons.items(), key=lambda x: x[1], reverse=True
         ):
             print(f"    {reason}: {count}")
+
+    # Empty line at end
+    print()
 
     return samples
 
@@ -261,10 +266,10 @@ def main() -> None:
     # Load samples
     print("Step 1: Loading JSON samples...")
     samples = load_json_samples(input_file, data_dir)
-    print(f"Loaded {len(samples)} valid samples")
+    print(f"Loaded {len(samples)} samples")
 
     if len(samples) == 0:
-        print("No valid samples found. Exiting.")
+        print("No samples found. Exiting.")
         return
 
     # Generate embeddings
