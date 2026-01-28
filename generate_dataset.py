@@ -1,23 +1,19 @@
-#!/usr/bin/env python3
-"""
-Generate embeddings for Wikidata query-SPARQL samples using Qwen3-Embedding-0.6B.
-Averages embeddings across all question variations per sample.
-"""
-
 import argparse
-import json
 from pathlib import Path
 
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
+from universal_ml_utils.io import dump_json, load_json, load_jsonl
 
 from utils import validate_sample
 
 
-def load_json_samples(data_dir: Path) -> list[dict]:
+def load_json_samples(input_file: Path, data_dir: Path) -> list[dict]:
     """Load all JSON samples that have questions and check validity."""
+    inputs = load_jsonl(input_file)
+
     samples = []
     json_files = sorted(data_dir.glob("*.json"))
 
@@ -31,10 +27,13 @@ def load_json_samples(data_dir: Path) -> list[dict]:
         "invalid_reasons": {},
     }
 
+    # Track validity reasons for samples without proper output (no questions)
+    no_output_reasons: dict[str, int] = {}
+
     for json_file in tqdm(json_files, desc="Loading samples"):
         try:
-            with open(json_file, encoding="utf-8") as f:
-                data = json.load(f)
+            data = load_json(json_file)
+            input = inputs[int(json_file.stem)]
 
             validity_stats["total"] += 1
 
@@ -57,7 +56,10 @@ def load_json_samples(data_dir: Path) -> list[dict]:
                 output_data = data["output"]
                 samples.append(
                     {
-                        "file": json_file.name,
+                        "origin": {
+                            "file": json_file.name,
+                            "input": input,
+                        },
                         "questions": output_data["questions"],
                         "sparql": output_data.get("sparql", ""),
                         "sparql_fixed": output_data.get("sparql_fixed", ""),
@@ -68,6 +70,9 @@ def load_json_samples(data_dir: Path) -> list[dict]:
                         "validity_reason": reason,
                     }
                 )
+            else:
+                # Track reasons for samples without proper output
+                no_output_reasons[reason] = no_output_reasons.get(reason, 0) + 1
 
         except Exception:
             continue
@@ -76,14 +81,36 @@ def load_json_samples(data_dir: Path) -> list[dict]:
     print("\nValidity Statistics:")
     print(f"  Total files processed: {validity_stats['total']}")
     print(f"  Samples with questions: {len(samples)}")
-    print(
-        f"  Valid samples: {validity_stats['valid']} ({validity_stats['valid'] / len(samples) * 100:.1f}%)"
-    )
-    print(f"  Invalid samples: {len(samples) - validity_stats['valid']}")
-    if validity_stats["invalid_reasons"]:
-        print("\n  Invalid reasons:")
+    no_output_total = sum(no_output_reasons.values())
+    print(f"  Samples without questions: {no_output_total}")
+
+    # Statistics for samples WITH questions
+    if len(samples) > 0:
+        valid_with_questions = sum(1 for s in samples if s["valid"])
+        invalid_with_questions = len(samples) - valid_with_questions
+        print(f"\n  Samples WITH questions:")
+        print(
+            f"    Valid: {valid_with_questions} ({valid_with_questions / len(samples) * 100:.1f}%)"
+        )
+        print(f"    Invalid: {invalid_with_questions}")
+        if invalid_with_questions > 0:
+            # Count invalid reasons for samples with questions
+            reasons_with_questions = {}
+            for s in samples:
+                if not s["valid"]:
+                    reason = s["validity_reason"]
+                    reasons_with_questions[reason] = reasons_with_questions.get(reason, 0) + 1
+            print("    Invalid reasons:")
+            for reason, count in sorted(
+                reasons_with_questions.items(), key=lambda x: x[1], reverse=True
+            ):
+                print(f"      {reason}: {count}")
+
+    # Statistics for samples WITHOUT questions
+    if no_output_reasons:
+        print(f"\n  Samples WITHOUT questions (reasons):")
         for reason, count in sorted(
-            validity_stats["invalid_reasons"].items(), key=lambda x: x[1], reverse=True
+            no_output_reasons.items(), key=lambda x: x[1], reverse=True
         ):
             print(f"    {reason}: {count}")
 
@@ -112,7 +139,7 @@ def generate_embeddings(
     print(f"\nLoading model: {model_name}")
     print(f"Using device: {device}")
     print(f"Batch size: {batch_size}")
-    model = SentenceTransformer(model_name, device=device, trust_remote_code=True)
+    model = SentenceTransformer(model_name, device=device)
 
     embeddings_list = []
 
@@ -130,7 +157,6 @@ def generate_embeddings(
             sample_indices.extend([sample_idx] * len(questions))
 
         # Encode all questions in the batch at once
-        # normalize_embeddings=True: L2-normalize for cosine distance via Euclidean
         question_embeddings = model.encode(
             all_questions,
             convert_to_numpy=True,
@@ -174,8 +200,7 @@ def save_results(
 
     # Save metadata as JSON
     samples_path = output_dir / "samples.json"
-    with open(samples_path, "w", encoding="utf-8") as f:
-        json.dump(samples, f, indent=2)
+    dump_json(samples, samples_path)
     print(f"Saved samples to {samples_path}")
 
     # Save a summary JSON
@@ -187,14 +212,13 @@ def save_results(
     }
 
     summary_path = output_dir / "summary.json"
-    with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    dump_json(summary, summary_path)
     print(f"Saved summary to {summary_path}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate embeddings for Wikidata query-SPARQL samples"
+        description="Validate, embed, and format Wikidata query-SPARQL samples"
     )
     parser.add_argument(
         "--model",
@@ -209,27 +233,34 @@ def main() -> None:
         help="Batch size for processing samples (default: 128)",
     )
     parser.add_argument(
-        "--input-dir",
+        "--data-dir",
         type=str,
         default="data/organic-qwen3-next-80b-a3b",
         help="Input directory containing JSON files (default: "
         "data/organic-qwen3-next-80b-a3b)",
     )
     parser.add_argument(
+        "--input-file",
+        type=str,
+        default="data/organic.jsonl",
+        help="Input JSONL file with original inputs (default: data/organic.jsonl)",
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
-        default=None,
-        help="Output directory for embeddings (default: <input-dir>/embeddings)",
+        default="data/organic-qwen3-next-80b-a3b-dataset",
+        help="Output directory for embeddings (default: data/organic-qwen3-next-80b-a3b-dataset)",
     )
 
     args = parser.parse_args()
 
-    data_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir) if args.output_dir else data_dir / "embeddings"
+    input_file = Path(args.input_file)
+    data_dir = Path(args.data_dir)
+    output_dir = Path(args.output_dir)
 
     # Load samples
     print("Step 1: Loading JSON samples...")
-    samples = load_json_samples(data_dir)
+    samples = load_json_samples(input_file, data_dir)
     print(f"Loaded {len(samples)} valid samples")
 
     if len(samples) == 0:

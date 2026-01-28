@@ -1,34 +1,10 @@
-#!/usr/bin/env python3
-"""
-Export SPARQL QA dataset from clustered QA samples.
-
-This script:
-1. Loads metadata and cluster labels
-2. Filters to only valid samples
-3. Samples one sample per cluster
-4. Splits train/val/test by cluster
-5. Exports to train.jsonl, val.jsonl, and test.jsonl
-"""
-
 import argparse
-import json
 import random
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-
-def load_json(path: Path) -> Any:
-    """Load JSON file."""
-    with open(path) as f:
-        return json.load(f)
-
-
-def write_jsonl(path: Path, data: list[dict[str, Any]]) -> None:
-    """Write data to JSONL file."""
-    with open(path, "w") as f:
-        for item in data:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+from universal_ml_utils.io import dump_jsonl, load_json
 
 
 def sample_one_per_cluster(
@@ -185,9 +161,9 @@ def main() -> None:
     args = parser.parse_args()
 
     # Load data
-    print(f"Loading data from {args.embeddings_dir}")
-    metadata = load_json(args.embeddings_dir / "samples.json")
-    cluster_labels = load_json(args.embeddings_dir / "cluster_labels.json")
+    print(f"Loading data from {args.dataset_dir}")
+    metadata = load_json(args.dataset_dir / "samples.json")
+    cluster_labels = load_json(args.dataset_dir / "cluster_labels.json")
 
     print(f"Loaded {len(metadata)} samples with {len(cluster_labels)} cluster labels")
 
@@ -240,10 +216,10 @@ def main() -> None:
     val_path = args.output_dir / "val.jsonl"
     test_path = args.output_dir / "test.jsonl"
 
-    print(f"\nWriting output files...")
-    write_jsonl(train_path, train_formatted)
-    write_jsonl(val_path, val_formatted)
-    write_jsonl(test_path, test_formatted)
+    print("\nWriting output files...")
+    dump_jsonl(train_path, train_formatted)
+    dump_jsonl(val_path, val_formatted)
+    dump_jsonl(test_path, test_formatted)
 
     print(f"  - {train_path}: {len(train_formatted)} samples")
     print(f"  - {val_path}: {len(val_formatted)} samples")

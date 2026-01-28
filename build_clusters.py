@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Build clusters from embeddings using HDBSCAN clustering with UMAP dimensionality reduction.
-Apply UMAP for 2D visualization.
-"""
-
 import argparse
 import json
 from pathlib import Path
@@ -14,11 +8,11 @@ from umap import UMAP
 
 
 def load_embeddings_and_samples(
-    embeddings_dir: Path,
-) -> tuple[np.ndarray, list[dict], dict]:
-    """Load embeddings, samples, and summary."""
+    dataset_dir: Path,
+) -> tuple[np.ndarray, list[dict]]:
+    """Load embeddings and samples"""
     # Load embeddings
-    embeddings_path = embeddings_dir / "embeddings.npy"
+    embeddings_path = dataset_dir / "embeddings.npy"
     if not embeddings_path.exists():
         raise FileNotFoundError(f"Embeddings not found: {embeddings_path}")
 
@@ -27,16 +21,11 @@ def load_embeddings_and_samples(
     print(f"Loaded {len(embeddings)} vectors, dimension {embeddings.shape[1]}")
 
     # Load samples
-    samples_path = embeddings_dir / "samples.json"
+    samples_path = dataset_dir / "samples.json"
     with open(samples_path, encoding="utf-8") as f:
         samples = json.load(f)
 
-    # Load summary
-    summary_path = embeddings_dir / "summary.json"
-    with open(summary_path, encoding="utf-8") as f:
-        summary = json.load(f)
-
-    return embeddings, samples, summary
+    return embeddings, samples
 
 
 def cluster_hdbscan(
@@ -145,7 +134,7 @@ def reduce_dimensions_umap(
 
 
 def save_results(
-    embeddings_dir: Path,
+    dataset_dir: Path,
     labels: np.ndarray,
     coords_2d: np.ndarray,
     cluster_stats: dict,
@@ -154,19 +143,19 @@ def save_results(
     print("\nSaving results...")
 
     # Save cluster labels
-    labels_path = embeddings_dir / "cluster_labels.json"
+    labels_path = dataset_dir / "cluster_labels.json"
     with open(labels_path, "w", encoding="utf-8") as f:
         json.dump(labels.tolist(), f)
     print(f"Saved cluster labels to {labels_path}")
 
     # Save UMAP coordinates
-    coords_path = embeddings_dir / "umap_coords.json"
+    coords_path = dataset_dir / "umap_coords.json"
     with open(coords_path, "w", encoding="utf-8") as f:
         json.dump(coords_2d.tolist(), f)
     print(f"Saved UMAP coordinates to {coords_path}")
 
     # Save cluster statistics
-    stats_path = embeddings_dir / "cluster_stats.json"
+    stats_path = dataset_dir / "cluster_stats.json"
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(cluster_stats, f, indent=2)
     print(f"Saved cluster statistics to {stats_path}")
@@ -177,10 +166,10 @@ def main() -> None:
         description="Build clusters from embeddings using UMAP + HDBSCAN and create 2D visualization"
     )
     parser.add_argument(
-        "--embeddings-dir",
+        "--dataset-dir",
         type=str,
-        default="data/organic-qwen3-next-80b-a3b/embeddings",
-        help="Directory containing embeddings (default: data/organic-qwen3-next-80b-a3b/embeddings)",
+        default="data/organic-qwen3-next-80b-a3b-dataset",
+        help="Directory containing embeddings (default: data/organic-qwen3-next-80b-a3b-dataset)",
     )
     parser.add_argument(
         "--min-cluster-size",
@@ -221,11 +210,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    embeddings_dir = Path(args.embeddings_dir)
+    dataset_dir = Path(args.embeddings_dir)
 
     # Load embeddings and samples
     print("Step 1: Loading embeddings and samples...")
-    embeddings, samples, summary = load_embeddings_and_samples(embeddings_dir)
+    embeddings, samples, summary = load_embeddings_and_samples(dataset_dir)
 
     # Create valid mask from samples
     valid_mask = np.array([sample["valid"] for sample in samples], dtype=bool)
@@ -273,7 +262,7 @@ def main() -> None:
 
     # Save results
     print("\nStep 4: Saving results...")
-    save_results(embeddings_dir, labels, coords_2d, cluster_stats)
+    save_results(dataset_dir, labels, coords_2d, cluster_stats)
 
     print("\n✓ Clustering and visualization complete!")
 

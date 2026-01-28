@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Streamlit app for interactive visualization of clustered embeddings.
-"""
-
-import json
 import random
 import re
 from pathlib import Path
@@ -11,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+from universal_ml_utils.io import load_json
 
 
 def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
@@ -50,28 +45,24 @@ def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
 
 @st.cache_data
 def load_data(
-    embeddings_dir: str,
+    dataset_dir: str,
 ) -> tuple[list[dict], list[int], list[list[float]], dict]:
     """Load samples, cluster labels, UMAP coordinates, and statistics."""
-    embeddings_path = Path(embeddings_dir)
+    dataset_path = Path(dataset_dir)
 
     # Load samples
-    with open(embeddings_path / "samples.json") as f:
-        samples = json.load(f)
+    samples = load_json(dataset_path / "samples.json")
 
     # Load cluster labels
-    with open(embeddings_path / "cluster_labels.json") as f:
-        labels = json.load(f)
+    labels = load_json(dataset_path / "cluster_labels.json")
 
     # Load UMAP coordinates
-    with open(embeddings_path / "umap_coords.json") as f:
-        coords = json.load(f)
+    coords = load_json(dataset_path / "umap_coords.json")
 
     # Load cluster stats
-    with open(embeddings_path / "cluster_stats.json") as f:
-        stats = json.load(f)
+    stats = load_json(dataset_path / "cluster_stats.json")
 
-    return samples, labels, coords, stats
+    return samples, labels, coords, stats  # type: ignore
 
 
 def compute_validity_stats(samples: list[dict]) -> dict:
@@ -135,14 +126,14 @@ def main() -> None:
     # Sidebar
     st.sidebar.header("Settings")
 
-    embeddings_dir = st.sidebar.text_input(
-        "Embeddings Directory",
-        value="data/organic-qwen3-next-80b-a3b/embeddings",
+    dataset_dir = st.sidebar.text_input(
+        "Data Directory",
+        value="data/organic-qwen3-next-80b-a3b-dataset",
     )
 
     # Load data
     try:
-        samples, labels, coords, cluster_stats = load_data(embeddings_dir)
+        samples, labels, coords, cluster_stats = load_data(dataset_dir)
     except FileNotFoundError as e:
         st.error(f"Error loading data: {e}")
         st.info(

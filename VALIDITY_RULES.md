@@ -12,7 +12,7 @@ A sample is considered **valid** if it meets ALL of the following criteria:
 4. ✅ `output.type` is NOT `"cancel"`
 5. ✅ `output.questions` field exists and contains at least one question
 6. ✅ The `formatted` result does NOT contain `"SPARQL execution failed"` (if present)
-7. ✅ The `formatted` result does NOT contain `"Got 0 rows"` (if present)
+7. ✅ The `formatted` result does NOT contain `"Got not rows"` (if present)
 
 ## Invalid Sample Categories
 
@@ -36,7 +36,7 @@ A sample is considered **invalid** if ANY of the following is true:
 
 ### 6. Execution Failures
 - **sparql_execution_failed**: The `formatted` result contains "SPARQL execution failed"
-- **empty_result**: The `formatted` result contains "Got 0 rows"
+- **empty_result**: The `formatted` result contains "Got no rows"
 
 ## JSON Structure
 
