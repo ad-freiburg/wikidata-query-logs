@@ -54,13 +54,13 @@ def load_data(
     samples = load_json(dataset_path / "samples.json")
 
     # Load cluster labels
-    labels = load_json(dataset_path / "cluster_labels.json")
+    labels = load_json(dataset_path / "clusters" / "cluster_labels.json")
 
     # Load UMAP coordinates
-    coords = load_json(dataset_path / "umap_coords.json")
+    coords = load_json(dataset_path / "clusters" / "umap_coords.json")
 
     # Load cluster stats
-    stats = load_json(dataset_path / "cluster_stats.json")
+    stats = load_json(dataset_path / "clusters" / "cluster_stats.json")
 
     return samples, labels, coords, stats  # type: ignore
 
@@ -111,7 +111,7 @@ def create_dataframe(
                 else "",
                 "valid": sample.get("valid", False),
                 "validity_reason": sample.get("validity_reason", "unknown"),
-                "file": sample["file"],
+                "file": sample["origin"]["file"],
             }
         )
 
