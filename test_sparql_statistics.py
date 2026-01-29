@@ -1,6 +1,12 @@
 import pytest
 
-from sparql_statistics import collect_present_nodes, count_node_occurrences
+from sparql_statistics import (
+    WIKIDATA_IRI_PREFIXES,
+    collect_iris,
+    collect_present_nodes,
+    count_node_occurrences,
+    get_iri_prefix,
+)
 from utils import load_sparql_parser, parse_sparql
 
 
@@ -31,9 +37,7 @@ class TestQueryTypes:
         assert "SELECT" not in present
 
     def test_construct_query(self, parser):
-        present = get_present_nodes(
-            "CONSTRUCT { ?x ?p ?o } WHERE { ?x ?p ?o }", parser
-        )
+        present = get_present_nodes("CONSTRUCT { ?x ?p ?o } WHERE { ?x ?p ?o }", parser)
         assert "CONSTRUCT" in present
         assert "SELECT" not in present
 
@@ -295,3 +299,102 @@ class TestTriplePatternCounting:
             parser,
         )
         assert count == 3
+
+
+class TestGetIriPrefix:
+    def test_entity_iri(self):
+        """Entity IRI should return wd: prefix."""
+        assert get_iri_prefix("http://www.wikidata.org/entity/Q42") == "wd:"
+
+    def test_prop_direct_iri(self):
+        """prop/direct IRI should return wdt: prefix."""
+        assert get_iri_prefix("http://www.wikidata.org/prop/direct/P31") == "wdt:"
+
+    def test_prop_statement_iri(self):
+        """prop/statement IRI should return ps: prefix."""
+        assert get_iri_prefix("http://www.wikidata.org/prop/statement/P31") == "ps:"
+
+    def test_prop_statement_normalized_iri(self):
+        """prop/statement/value-normalized should return psn: (not ps:)."""
+        assert (
+            get_iri_prefix("http://www.wikidata.org/prop/statement/value-normalized/P31")
+            == "psn:"
+        )
+
+    def test_prop_qualifier_iri(self):
+        """prop/qualifier IRI should return pq: prefix."""
+        assert get_iri_prefix("http://www.wikidata.org/prop/qualifier/P585") == "pq:"
+
+    def test_prop_qualifier_normalized_iri(self):
+        """prop/qualifier/value-normalized should return pqn: (not pq:)."""
+        assert (
+            get_iri_prefix("http://www.wikidata.org/prop/qualifier/value-normalized/P585")
+            == "pqn:"
+        )
+
+    def test_non_wikidata_iri(self):
+        """Non-Wikidata IRIs should return None."""
+        assert get_iri_prefix("http://www.w3.org/2000/01/rdf-schema#label") is None
+        assert get_iri_prefix("http://schema.org/name") is None
+
+
+def get_iris_by_prefix(query: str, parser) -> dict[str, set[str]]:
+    """Helper to parse a query and return collected IRIs by prefix."""
+    tree = parse_sparql(query, parser)
+    iris_by_prefix: dict[str, set[str]] = {
+        prefix: set() for _, prefix in WIKIDATA_IRI_PREFIXES
+    }
+    collect_iris(tree, iris_by_prefix)
+    return iris_by_prefix
+
+
+class TestCollectIris:
+    def test_wd_entity(self, parser):
+        """wd: entities should be collected under wd: prefix."""
+        iris = get_iris_by_prefix("SELECT ?x WHERE { wd:Q42 ?p ?x }", parser)
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+
+    def test_wdt_property(self, parser):
+        """wdt: properties should be collected under wdt: prefix."""
+        iris = get_iris_by_prefix("SELECT ?x WHERE { ?s wdt:P31 ?x }", parser)
+        assert "http://www.wikidata.org/prop/direct/P31" in iris["wdt:"]
+
+    def test_multiple_prefixes(self, parser):
+        """IRIs with different prefixes should be collected separately."""
+        iris = get_iris_by_prefix("SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }", parser)
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+        assert "http://www.wikidata.org/prop/direct/P31" in iris["wdt:"]
+
+    def test_full_iri(self, parser):
+        """Full Wikidata IRIs should be collected."""
+        iris = get_iris_by_prefix(
+            "SELECT ?x WHERE { <http://www.wikidata.org/entity/Q42> ?p ?x }", parser
+        )
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+
+    def test_non_wikidata_iri_ignored(self, parser):
+        """Non-Wikidata IRIs should be ignored."""
+        iris = get_iris_by_prefix(
+            "SELECT ?x WHERE { ?s <http://www.w3.org/2000/01/rdf-schema#label> ?x }",
+            parser,
+        )
+        total_iris = sum(len(s) for s in iris.values())
+        assert total_iris == 0
+
+    def test_same_iri_deduplicated_within_prefix(self, parser):
+        """Same IRI appearing twice should be deduplicated within its prefix."""
+        iris = get_iris_by_prefix(
+            "SELECT ?x WHERE { wd:Q42 ?p ?x . wd:Q42 ?q ?y }", parser
+        )
+        assert len(iris["wd:"]) == 1
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+
+    def test_psn_not_matched_by_ps(self, parser):
+        """psn: should not be incorrectly matched by ps: prefix."""
+        iris = get_iris_by_prefix(
+            "SELECT ?x WHERE { ?s ps:P31 ?x . ?s psn:P569 ?y }", parser
+        )
+        assert "http://www.wikidata.org/prop/statement/P31" in iris["ps:"]
+        assert "http://www.wikidata.org/prop/statement/value-normalized/P569" in iris["psn:"]
+        assert len(iris["ps:"]) == 1
+        assert len(iris["psn:"]) == 1

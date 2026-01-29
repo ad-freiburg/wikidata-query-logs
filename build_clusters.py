@@ -162,9 +162,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--dataset-dir",
-        type=str,
-        default="data/organic-qwen3-next-80b-a3b-dataset/clusters",
-        help="Directory containing embeddings (default: data/organic-qwen3-next-80b-a3b-dataset/clusters)",
+        type=Path,
+        default=Path("data/organic-qwen3-next-80b-a3b-dataset"),
+        help="Directory containing embeddings (default: data/organic-qwen3-next-80b-a3b-dataset)",
     )
     parser.add_argument(
         "--min-cluster-size",
@@ -205,11 +205,9 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    dataset_dir = Path(args.dataset_dir)
-
     # Load embeddings and samples
     print("Step 1: Loading embeddings and samples...")
-    embeddings, samples = load_embeddings_and_samples(dataset_dir)
+    embeddings, samples = load_embeddings_and_samples(args.dataset_dir)
 
     # Create valid mask from samples
     valid_mask = np.array([sample["valid"] for sample in samples], dtype=bool)
@@ -257,7 +255,7 @@ def main() -> None:
 
     # Save results
     print("\nStep 4: Saving results...")
-    save_results(dataset_dir, labels, coords_2d, cluster_stats)
+    save_results(args.dataset_dir / "clusters", labels, coords_2d, cluster_stats)
 
     print("\n✓ Clustering and visualization complete!")
 

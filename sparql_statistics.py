@@ -2,7 +2,60 @@ import json
 import sys
 from collections import Counter
 
+from tqdm import tqdm
+
 from utils import load_sparql_parser, parse_sparql
+
+# Wikidata IRI base prefixes, sorted by length (longest first) for correct matching
+WIKIDATA_IRI_PREFIXES = [
+    ("http://www.wikidata.org/prop/direct-normalized/", "wdtn:"),
+    ("http://www.wikidata.org/prop/statement/value-normalized/", "psn:"),
+    ("http://www.wikidata.org/prop/qualifier/value-normalized/", "pqn:"),
+    ("http://www.wikidata.org/prop/reference/value-normalized/", "prn:"),
+    ("http://www.wikidata.org/prop/direct/", "wdt:"),
+    ("http://www.wikidata.org/prop/statement/", "ps:"),
+    ("http://www.wikidata.org/prop/qualifier/", "pq:"),
+    ("http://www.wikidata.org/prop/reference/", "pr:"),
+    ("http://www.wikidata.org/entity/", "wd:"),
+    ("http://www.wikidata.org/prop/", "p:"),
+]
+
+
+def get_iri_prefix(iri: str) -> str | None:
+    """Get the Wikidata prefix for an IRI, or None if not a Wikidata IRI."""
+    for base, prefix in WIKIDATA_IRI_PREFIXES:
+        if iri.startswith(base):
+            return prefix
+    return None
+
+
+def collect_iris(tree: dict | list, iris_by_prefix: dict[str, set[str]]) -> None:
+    """Recursively collect Wikidata IRIs from the parse tree, grouped by prefix."""
+    if isinstance(tree, dict):
+        name = tree.get("name")
+        value = tree.get("value")
+
+        if name == "IRIREF" and value:
+            # Full IRI like <http://...>, strip brackets
+            iri = value[1:-1]
+            prefix = get_iri_prefix(iri)
+            if prefix:
+                iris_by_prefix[prefix].add(iri)
+        elif name == "PNAME_LN" and value:
+            # Prefixed name like wd:Q42 or wdt:P31
+            for base, prefix in WIKIDATA_IRI_PREFIXES:
+                if value.startswith(prefix):
+                    # Expand to full IRI
+                    local_name = value[len(prefix) :]
+                    iri = base + local_name
+                    iris_by_prefix[prefix].add(iri)
+                    break
+
+        for child in tree.get("children", []):
+            collect_iris(child, iris_by_prefix)
+    elif isinstance(tree, list):
+        for item in tree:
+            collect_iris(item, iris_by_prefix)
 
 
 def collect_present_nodes(tree: dict | list, present: set[str]) -> None:
@@ -47,6 +100,11 @@ def main() -> None:
     # Track triple pattern counts per query
     triple_pattern_counts: list[int] = []
 
+    # Track IRIs by prefix
+    iris_by_prefix: dict[str, set[str]] = {
+        prefix: set() for _, prefix in WIKIDATA_IRI_PREFIXES
+    }
+
     # Constructs we're interested in (terminals from sparql.l and rules from sparql.y)
     constructs_of_interest = [
         # Query types (terminals)
@@ -86,7 +144,7 @@ def main() -> None:
         ("SubSelect", "Subquery"),
     ]
 
-    for line in sys.stdin:
+    for line in tqdm(sys.stdin, desc="Processing queries", unit=" queries"):
         line = line.strip()
         if not line:
             continue
@@ -111,6 +169,9 @@ def main() -> None:
             # Count triple patterns
             triple_count = count_node_occurrences(tree, "TriplesSameSubjectPath")
             triple_pattern_counts.append(triple_count)
+
+            # Collect IRIs by prefix
+            collect_iris(tree, iris_by_prefix)
 
         except Exception as e:
             print(f"SPARQL parse error: {e}", file=sys.stderr)
@@ -146,7 +207,7 @@ def main() -> None:
 
         # Distribution
         triple_distribution: Counter[int] = Counter(triple_pattern_counts)
-        print(f"\n  Distribution (count: queries):")
+        print("\n  Distribution (count: queries):")
         for count in sorted(triple_distribution.keys())[:15]:
             num_queries = triple_distribution[count]
             pct = num_queries / successfully_parsed * 100
@@ -163,6 +224,18 @@ def main() -> None:
             count = construct_presence.get(node_name, 0)
             pct = count / successfully_parsed * 100
             print(f"  {display_name}: {count} ({pct:.1f}%)")
+
+        # Unique IRIs by prefix
+        print(f"\n{'-' * 60}")
+        print("Unique Wikidata IRIs by Prefix:")
+        print(f"{'-' * 60}")
+
+        total_iris = sum(len(iris) for iris in iris_by_prefix.values())
+        print(f"  Total unique IRIs: {total_iris:,}")
+        for _, prefix in WIKIDATA_IRI_PREFIXES:
+            count = len(iris_by_prefix[prefix])
+            if count > 0:
+                print(f"  {prefix} {count:,}")
 
 
 if __name__ == "__main__":

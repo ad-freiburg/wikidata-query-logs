@@ -8,7 +8,9 @@ from universal_ml_utils.io import dump_jsonl, load_json
 
 
 def sample_one_per_cluster(
-    metadata: list[dict[str, Any]], cluster_labels: list[int], seed: int = 42
+    metadata: list[dict[str, Any]],
+    cluster_labels: list[int],
+    seed: int = 22,
 ) -> list[dict[str, Any]]:
     """
     Sample one valid sample per cluster.
@@ -27,11 +29,14 @@ def sample_one_per_cluster(
     cluster_to_samples: dict[int, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
 
     for idx, (sample, cluster_id) in enumerate(zip(metadata, cluster_labels)):
-        # Skip invalid samples (cluster_id == -1 or not valid)
-        if cluster_id == -1 or not sample.get("valid", False):
+        # Skip invalid samples
+        if not sample["valid"]:
+            assert cluster_id == -1, "Invalid points should not be assigned to clusters"
             continue
 
         cluster_to_samples[cluster_id].append((idx, sample))
+
+    print(f"Found {len(cluster_to_samples)} clusters with valid samples")
 
     # Sample one per cluster
     sampled = []
@@ -44,7 +49,6 @@ def sample_one_per_cluster(
             {
                 "cluster_id": cluster_id,
                 "sample_idx": idx,
-                "file": sample["file"],
                 "questions": sample["questions"],
                 "sparql": sparql,
             }
@@ -57,7 +61,7 @@ def split_by_cluster(
     samples: list[dict[str, Any]],
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
-    seed: int = 42,
+    seed: int = 22,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Split samples into train, validation, and test sets by cluster.
@@ -131,15 +135,15 @@ def main() -> None:
         description="Export SPARQL QA dataset from clustered samples"
     )
     parser.add_argument(
-        "--embeddings-dir",
+        "--dataset-dir",
         type=Path,
-        default=Path("data/organic-qwen3-next-80b-a3b/embeddings"),
+        default=Path("data/organic-qwen3-next-80b-a3b-dataset"),
         help="Path to embeddings directory with samples.json and cluster_labels.json",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/dataset"),
+        default=Path("data/wdql-kgqa-dataset"),
         help="Output directory for train.jsonl, val.jsonl, and test.jsonl",
     )
     parser.add_argument(
@@ -155,7 +159,10 @@ def main() -> None:
         help="Ratio of clusters for validation (default: 0.15)",
     )
     parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed for reproducibility"
+        "--seed",
+        type=int,
+        default=22,
+        help="Random seed for reproducibility",
     )
 
     args = parser.parse_args()
@@ -163,7 +170,7 @@ def main() -> None:
     # Load data
     print(f"Loading data from {args.dataset_dir}")
     metadata = load_json(args.dataset_dir / "samples.json")
-    cluster_labels = load_json(args.dataset_dir / "cluster_labels.json")
+    cluster_labels = load_json(args.dataset_dir / "clusters" / "cluster_labels.json")
 
     print(f"Loaded {len(metadata)} samples with {len(cluster_labels)} cluster labels")
 
@@ -181,10 +188,8 @@ def main() -> None:
     )
 
     # Count valid samples
-    num_valid = sum(
-        1 for s, c in zip(metadata, cluster_labels) if s.get("valid", False) and c != -1
-    )
-    num_invalid = sum(1 for s, c in zip(metadata, cluster_labels) if c == -1)
+    num_valid = len(sampled)
+    num_invalid = len(cluster_labels) - num_valid
     print(f"  - Valid samples: {num_valid}")
     print(f"  - Invalid samples: {num_invalid}")
 
@@ -217,9 +222,9 @@ def main() -> None:
     test_path = args.output_dir / "test.jsonl"
 
     print("\nWriting output files...")
-    dump_jsonl(train_path, train_formatted)
-    dump_jsonl(val_path, val_formatted)
-    dump_jsonl(test_path, test_formatted)
+    dump_jsonl(train_formatted, train_path)
+    dump_jsonl(val_formatted, val_path)
+    dump_jsonl(test_formatted, test_path)
 
     print(f"  - {train_path}: {len(train_formatted)} samples")
     print(f"  - {val_path}: {len(val_formatted)} samples")

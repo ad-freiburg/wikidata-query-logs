@@ -239,33 +239,29 @@ def main() -> None:
     )
     parser.add_argument(
         "--data-dir",
-        type=str,
-        default="data/organic-qwen3-next-80b-a3b",
+        type=Path,
+        default=Path("data/organic-qwen3-next-80b-a3b"),
         help="Input directory containing JSON files (default: "
         "data/organic-qwen3-next-80b-a3b)",
     )
     parser.add_argument(
         "--input-file",
-        type=str,
-        default="data/organic.jsonl",
+        type=Path,
+        default=Path("data/organic.jsonl"),
         help="Input JSONL file with original inputs (default: data/organic.jsonl)",
     )
     parser.add_argument(
         "--output-dir",
-        type=str,
-        default="data/organic-qwen3-next-80b-a3b-dataset",
+        type=Path,
+        default=Path("data/organic-qwen3-next-80b-a3b-dataset"),
         help="Output directory for embeddings (default: data/organic-qwen3-next-80b-a3b-dataset)",
     )
 
     args = parser.parse_args()
 
-    input_file = Path(args.input_file)
-    data_dir = Path(args.data_dir)
-    output_dir = Path(args.output_dir)
-
     # Load samples
     print("Step 1: Loading JSON samples...")
-    samples = load_json_samples(input_file, data_dir)
+    samples = load_json_samples(args.input_file, args.data_dir)
     print(f"Loaded {len(samples)} samples")
 
     if len(samples) == 0:
@@ -282,7 +278,7 @@ def main() -> None:
 
     # Save results
     print("\nStep 3: Saving results...")
-    save_results(embeddings, samples, output_dir, args.model)
+    save_results(embeddings, samples, args.output_dir, args.model)
 
     print("\n✓ Embedding generation complete!")
 
