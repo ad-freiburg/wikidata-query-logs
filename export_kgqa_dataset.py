@@ -7,17 +7,19 @@ from typing import Any
 from universal_ml_utils.io import dump_jsonl, load_json
 
 
-def sample_one_per_cluster(
+def sample_from_clusters(
     metadata: list[dict[str, Any]],
     cluster_labels: list[int],
+    samples_per_cluster: int = 1,
     seed: int = 22,
 ) -> list[dict[str, Any]]:
     """
-    Sample one valid sample per cluster.
+    Sample valid samples from each cluster.
 
     Args:
         metadata: List of sample metadata
         cluster_labels: List of cluster IDs for each sample
+        samples_per_cluster: Number of samples to take per cluster
         seed: Random seed for reproducibility
 
     Returns:
@@ -38,21 +40,26 @@ def sample_one_per_cluster(
 
     print(f"Found {len(cluster_to_samples)} clusters with valid samples")
 
-    # Sample one per cluster
+    # Sample from each cluster
     sampled = []
     for cluster_id, samples in sorted(cluster_to_samples.items()):
-        # Randomly sample one from the cluster
-        idx, sample = random.choice(samples)
-        # Prefer sparql_fixed if available and non-empty, otherwise use sparql
-        sparql = sample.get("sparql_fixed", "").strip() or sample["sparql"]
-        sampled.append(
-            {
-                "cluster_id": cluster_id,
-                "sample_idx": idx,
-                "questions": sample["questions"],
-                "sparql": sparql,
-            }
-        )
+        # Select samples: -1 means keep all, otherwise sample up to k
+        if samples_per_cluster == -1:
+            selected = samples
+        else:
+            k = min(samples_per_cluster, len(samples))
+            selected = random.sample(samples, k)
+        for idx, sample in selected:
+            # Prefer sparql_fixed if available and non-empty, otherwise use sparql
+            sparql = sample.get("sparql_fixed", "").strip() or sample["sparql"]
+            sampled.append(
+                {
+                    "cluster_id": cluster_id,
+                    "sample_idx": idx,
+                    "questions": sample["questions"],
+                    "sparql": sparql,
+                }
+            )
 
     return sampled
 
@@ -164,6 +171,12 @@ def main() -> None:
         default=22,
         help="Random seed for reproducibility",
     )
+    parser.add_argument(
+        "--samples-per-cluster",
+        type=int,
+        default=1,
+        help="Number of samples to keep per cluster, -1 for all (default: 1)",
+    )
 
     args = parser.parse_args()
 
@@ -180,9 +193,13 @@ def main() -> None:
             f"Mismatch: {len(metadata)} samples but {len(cluster_labels)} cluster labels"
         )
 
-    # Sample one per cluster
-    print("\nSampling one sample per cluster...")
-    sampled = sample_one_per_cluster(metadata, cluster_labels, seed=args.seed)
+    # Sample from clusters
+    print(f"\nSampling {args.samples_per_cluster} sample(s) per cluster...")
+    sampled = sample_from_clusters(
+        metadata, cluster_labels,
+        samples_per_cluster=args.samples_per_cluster,
+        seed=args.seed,
+    )
     print(
         f"Sampled {len(sampled)} samples from {len(set(s['cluster_id'] for s in sampled))} clusters"
     )
