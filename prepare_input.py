@@ -1,23 +1,64 @@
 import argparse
 import json
-import os
 import re
 from csv import DictReader
+from pathlib import Path
 from typing import TextIO
 from urllib.parse import unquote_plus
 
 from tqdm import tqdm
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+def clean(sparql: str) -> str:
+    """Normalize whitespace in a SPARQL query."""
+    return re.sub(r"\s+", " ", sparql, flags=re.DOTALL).strip()
+
+
+def prepare_file(
+    in_file: Path,
+    out_files: dict[str, TextIO],
+    seen: set[str],
+) -> tuple[int, int]:
+    """Process a single input file and write unique queries to output files."""
+    num_total = 0
+    num_duplicate = 0
+
+    with open(in_file, "r") as f:
+        reader = DictReader(
+            f,
+            delimiter="\t",
+            fieldnames=["sparql", "timestamp", "source", "user_agent"],
+        )
+
+        for row in reader:
+            if row["source"] not in out_files:
+                continue
+
+            sparql = clean(unquote_plus(row["sparql"]))
+            num_total += 1
+            if sparql in seen:
+                num_duplicate += 1
+                continue
+
+            seen.add(sparql)
+            out_files[row["source"]].write(json.dumps(sparql) + "\n")
+
+    return num_total, num_duplicate
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Prepare Wikidata query logs for processing"
+    )
     parser.add_argument(
         "files",
         nargs="+",
+        type=Path,
         help="Input TSV files containing Wikidata query logs",
     )
     parser.add_argument(
         "output_dir",
+        type=Path,
         help="Output directory to save prepared JSONL files",
     )
     parser.add_argument(
@@ -36,58 +77,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Whether to show progress bars",
     )
-    return parser.parse_args()
 
+    args = parser.parse_args()
 
-def clean(sparql: str) -> str:
-    return re.sub(r"\s+", " ", sparql, flags=re.DOTALL).strip()
+    print(f"Preparing {len(args.files)} input files for splits: {args.splits}")
 
-
-def prepare_file(
-    in_file: str,
-    out_files: dict[str, TextIO],
-    seen: set[str],
-) -> tuple[int, int]:
-    num_total = 0
-    num_duplicate = 0
-
-    reader = DictReader(
-        open(in_file, "r"),
-        delimiter="\t",
-        fieldnames=["sparql", "timestamp", "source", "user_agent"],
-    )
-
-    for row in reader:
-        if row["source"] not in out_files:
-            continue
-
-        sparql = clean(unquote_plus(row["sparql"]))
-        num_total += 1
-        if sparql in seen:
-            num_duplicate += 1
-            continue
-
-        seen.add(sparql)
-        out_files[row["source"]].write(json.dumps(sparql) + "\n")
-
-    return num_total, num_duplicate
-
-
-def prepare(args: argparse.Namespace):
-    out_files = {}
+    out_files: dict[str, TextIO] = {}
     for split in args.splits:
-        out_file = os.path.join(args.output_dir, f"{split}.jsonl")
-        if os.path.exists(out_file) and not args.overwrite:
-            print(f"Output file for {split} in {args.output_dir} already exist")
+        out_path = args.output_dir / f"{split}.jsonl"
+        if out_path.exists() and not args.overwrite:
+            print(f"  - Skipping {split}: output file already exists")
             continue
-        out_files[split] = open(out_file, "w")
+        out_files[split] = open(out_path, "w")
 
     if not out_files:
+        print("\nNo files to process")
         return
 
     num_total = 0
     num_duplicate = 0
-    seen = set()
+    seen: set[str] = set()
 
     for file in tqdm(
         args.files,
@@ -102,12 +111,13 @@ def prepare(args: argparse.Namespace):
     for f in out_files.values():
         f.close()
 
-    print(
-        f"{num_duplicate:,} / {num_total:,} duplicates "
-        f"({num_duplicate / max(num_total, 1):.1%}) for "
-        f"splits {args.splits}"
-    )
+    num_unique = num_total - num_duplicate
+    print(f"\nResults:")
+    print(f"  - Total queries: {num_total:,}")
+    print(f"  - Unique queries: {num_unique:,}")
+    print(f"  - Duplicates: {num_duplicate:,} ({num_duplicate / max(num_total, 1):.1%})")
+    print("\nDone!")
 
 
 if __name__ == "__main__":
-    prepare(parse_args())
+    main()
