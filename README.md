@@ -50,9 +50,10 @@ python export_kgqa_dataset.py
 ## Statistics
 
 ```bash
-cat data/organic-qwen3-next-80b-a3b-dataset/samples.json \
-  | jq -c '.[] | select(.valid == true) | .sparql' \
-  | python sparql_statistics.py
+for bench in data/(wdql-full|wdql|spinach|simplequestions|qald7|wwq|lcquad2|qald10); \
+  do cat $bench/*.jsonl | jq '.sparql' | python sparql_statistics.py \
+  > $bench/statistics.txt; \
+done
 ```
 
 ## Visualization

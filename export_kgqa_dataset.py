@@ -150,7 +150,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/wdql-kgqa-dataset"),
+        default=Path("data/wdql"),
         help="Output directory for train.jsonl, val.jsonl, and test.jsonl",
     )
     parser.add_argument(
@@ -196,7 +196,8 @@ def main() -> None:
     # Sample from clusters
     print(f"\nSampling {args.samples_per_cluster} sample(s) per cluster...")
     sampled = sample_from_clusters(
-        metadata, cluster_labels,
+        metadata,
+        cluster_labels,
         samples_per_cluster=args.samples_per_cluster,
         seed=args.seed,
     )
