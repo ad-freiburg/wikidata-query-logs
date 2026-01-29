@@ -10,12 +10,13 @@ Pre-generated files are available at https://ad-publications.cs.uni-freiburg.de/
 
 - `organic.tar.gz` - Prepared SPARQL queries as JSONL
 - `organic-qwen3-next-80b-a3b.tar.gz` - Generated question-SPARQL pairs
-- `organic-qwen3-next-80b-a3b-dataset.tar.gz` - Dataset with embeddings and clusters
-- `wdql-kgqa-dataset.tar.gz` - Deduplicated KGQA dataset (train/val/test splits)
-- `items.tar.gz` - Wikidata item identifiers (needed for statistics script)
+- `organic-qwen3-next-80b-a3b-dataset.tar.gz` - Raw dataset with embeddings and clusters
+- `wdql.tar.gz` - Deduplicated KGQA dataset (train/val/test splits)
+- `wdql-full.tar.gz` - Full KGQA dataset (train/val/test splits)
+- `wikidata-benchmarks.tar.gz` - Other Wikidata benchmarks (for comparison)
 
-Download and extract these files into a subdirectory named `data/`
-to avoid re-running the entire pipeline.
+Download and extract all of these files into a subdirectory named `data/` to skip
+some or all of the steps below.
 
 ## Pipeline
 
@@ -66,13 +67,17 @@ python build_clusters.py
 ### 5. Export KGQA dataset using clusters
 
 ```bash
+# Deduplicated WDQL dataset
 python export_kgqa_dataset.py
+# Full WDQL dataset
+python export_kgqa_dataset.py --output-dir data/wdql-full \
+  --samples-per-cluster -1
 ```
 
 ## Statistics
 
 ```bash
-for bench in data/(wdql-full|wdql|spinach|simplequestions|qald7|wwq|lcquad2|qald10); \
+for bench in data/(wdql-full|wdql|spinach|simplequestions|qald7|wwq|qawiki|lcquad2|qald10); \
   do cat $bench/*.jsonl | jq '.sparql' | python sparql_statistics.py \
   > $bench/statistics.txt; \
 done
