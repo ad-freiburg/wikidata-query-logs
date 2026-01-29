@@ -100,6 +100,14 @@ def main() -> None:
     # Track triple pattern counts per query
     triple_pattern_counts: list[int] = []
 
+    # Track queries using advanced SPARQL constructs
+    advanced_constructs = {"UNION", "MINUS", "OPTIONAL", "GROUP", "|", "/", "PathMod", "SubSelect"}
+    queries_with_advanced = 0
+
+    # Track queries using any property path feature
+    path_constructs = {"|", "/", "PathMod"}
+    queries_with_paths = 0
+
     # Track IRIs by prefix
     iris_by_prefix: dict[str, set[str]] = {
         prefix: set() for _, prefix in WIKIDATA_IRI_PREFIXES
@@ -166,6 +174,14 @@ def main() -> None:
             for node in present:
                 construct_presence[node] += 1
 
+            # Check for advanced constructs
+            if present & advanced_constructs:
+                queries_with_advanced += 1
+
+            # Check for property paths
+            if present & path_constructs:
+                queries_with_paths += 1
+
             # Count triple patterns
             triple_count = count_node_occurrences(tree, "TriplesSameSubjectPath")
             triple_pattern_counts.append(triple_count)
@@ -189,6 +205,10 @@ def main() -> None:
     print(f"Successfully parsed: {successfully_parsed}")
 
     if successfully_parsed > 0:
+        adv_pct = queries_with_advanced / successfully_parsed * 100
+        print(f"Queries with advanced constructs: {queries_with_advanced} ({adv_pct:.1f}%)")
+        path_pct = queries_with_paths / successfully_parsed * 100
+        print(f"Queries with property paths: {queries_with_paths} ({path_pct:.1f}%)")
         # Triple pattern statistics
         print(f"\n{'-' * 60}")
         print("Triple Pattern Statistics:")

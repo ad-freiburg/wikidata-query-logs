@@ -22,12 +22,34 @@ to avoid re-running the entire pipeline.
 ### 1. Prepare input from query logs
 
 ```bash
-python prepare_input.py logs/*.tsv data/
+python prepare_input.py data/*.tsv data/
 ```
 
-### 2. Generate question-SPARQL pairs
+### 2. Generate question-SPARQL pairs with GRASP
 
-TODO
+```bash
+# Checkout wdql branch of GRASP
+git clone -b wikidata-query-logs --single-branch git@github.com:ad-freiburg/grasp.git
+
+# Install GRASP
+cd grasp
+pip install -e .
+
+# Start vLLM server with Qwen-3-Next-80B-A3B
+vllm serve Qwen/Qwen3-Next-80B-A3B-Instruct \
+  --tool-call-parser hermes \
+  --enable-auto-tool-choice \
+  --port 8337
+
+# Start GRASP server with wdql config (runs on port 12345)
+grasp serve configs/wikidata-query-logs/qwen3-next-80b-a3b.yaml
+
+# Run generation script (more options available in the script)
+python scripts/run_wikidata_query_logs.py \
+  data/organic.jsonl \
+  data/organic-qwen3-next-80b-a3b/ \
+  http://localhost:12345/run
+```
 
 ### 3. Generate dataset and embeddings
 
