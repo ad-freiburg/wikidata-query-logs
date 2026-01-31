@@ -1,19 +1,45 @@
-# Wikidata Query Logs Dataset
+# Wikidata Query Logs Dataset (WDQL)
 
 A dataset of SPARQL-question pairs built from
 [Wikidata Query Logs](https://iccl.inf.tu-dresden.de/web/Wikidata_SPARQL_Logs/en)
 from 2017 to 2018.
 
+# Overview
+
+The two most important files are:
+- [wdql-all.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-all.tar.gz): Full WDQL dataset for KGQA (train/val/test splits by cluster, all pairs per cluster retained)
+- [wdql-uniq.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-uniq.tar.gz): Deduplicated WDQL dataset for KGQA (train/val/test splits by cluster, one pair per cluster retained)
+
+Each archive contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
+Each line in these files is a JSON object with the following structure:
+
+```json
+{
+  "id": "train_38222",
+  "question": "List all Wikipedia language editions and their ISO 639 language codes.",
+  "sparql": "SELECT ?wikipediaEdition ?languageCode WHERE { ?wikipediaEdition wdt:P31 wd:Q10876391 . OPTIONAL { ?wikipediaEdition wdt:P424 ?languageCode . } }",
+  "paraphrases": [
+    "What are the language codes for each Wikipedia language edition?",
+    "Show me the names of all Wikipedia language editions along with the corresponding Wikimedia language codes used to identify them."
+  ],
+  "info": {}
+}
+```
+
+> Note: If you want to use WDQL for something else than KGQA, you can just
+> concatenate all JSONL files after downloading and extracting `wdql-all.tar.gz` or
+> `wdql-uniq.tar.gz` to get a single file with all question-SPARQL pairs.
+
 ## Downloads
 
 Pre-generated files are available at https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs:
 
-- `organic.tar.gz` - Prepared SPARQL queries as JSONL
-- `organic-qwen3-next-80b-a3b.tar.gz` - Generated question-SPARQL pairs
-- `organic-qwen3-next-80b-a3b-dataset.tar.gz` - Raw dataset with embeddings and clusters
-- `wdql.tar.gz` - Deduplicated KGQA dataset (train/val/test splits)
-- `wdql-full.tar.gz` - Full KGQA dataset (train/val/test splits)
-- `wikidata-benchmarks.tar.gz` - Other Wikidata benchmarks (for comparison)
+- `organic.tar.gz`: Prepared SPARQL queries as JSONL
+- `organic-qwen3-next-80b-a3b.tar.gz`: Generated question-SPARQL pairs
+- `organic-qwen3-next-80b-a3b-dataset.tar.gz`: Raw dataset with embeddings and clusters
+- `wdql-all.tar.gz`: Full KGQA dataset (train/val/test splits)
+- `wdql-uniq.tar.gz`: Deduplicated KGQA dataset (train/val/test splits)
+- `wikidata-benchmarks.tar.gz`: Other Wikidata benchmarks (for comparison)
 
 Download and extract all of these files into a subdirectory named `data/` to skip
 some or all of the steps below.
@@ -67,14 +93,16 @@ python build_clusters.py
 ### 5. Export KGQA dataset using clusters
 
 ```bash
-# Deduplicated WDQL dataset
+# Deduplicated WDQL dataset (uniq)
 python export_kgqa_dataset.py
-# Full WDQL dataset
-python export_kgqa_dataset.py --output-dir data/wdql-full \
+# Full WDQL dataset (all)
+python export_kgqa_dataset.py --output-dir data/wdql-all \
   --samples-per-cluster -1
 ```
 
 ## Statistics
+
+Generate some statistics about WDQL and other Wikidata datasets:
 
 ```bash
 for bench in data/(wdql-full|wdql|spinach|simplequestions|qald7|wwq|qawiki|lcquad2|qald10); \

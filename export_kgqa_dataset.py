@@ -150,7 +150,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/wdql"),
+        default=Path("data/wdql-uniq"),
         help="Output directory for train.jsonl, val.jsonl, and test.jsonl",
     )
     parser.add_argument(
