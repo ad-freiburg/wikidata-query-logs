@@ -13,7 +13,7 @@ The two most important files are:
 Each archive contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
 Each line in these files is a JSON object with the following structure:
 
-```json
+```jsonc
 {
   "id": "train_38222",
   "question": "List all Wikipedia language editions and their ISO 639 language codes.",
@@ -22,7 +22,10 @@ Each line in these files is a JSON object with the following structure:
     "What are the language codes for each Wikipedia language edition?",
     "Show me the names of all Wikipedia language editions along with the corresponding Wikimedia language codes used to identify them."
   ],
-  "info": {}
+  "info": {
+    // Original input SPARQL query from the Wikidata Query Logs
+    "raw_sparql": "SELECT ?var1 ?var2 WHERE { ?var1 <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q10876391> . OPTIONAL { ?var1 <http://www.wikidata.org/prop/direct/P424> ?var2 . } }"
+  }
 }
 ```
 
@@ -116,3 +119,9 @@ done
 ```bash
 streamlit run visualize_app.py
 ```
+
+## Declaration on AI
+
+The code in this repository was written with the help of AI coding assistants, in
+particular Claude Code. All AI-generated code was reviewed and edited by human
+developers to ensure correctness and quality.

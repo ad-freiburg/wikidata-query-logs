@@ -58,6 +58,7 @@ def sample_from_clusters(
                     "sample_idx": idx,
                     "questions": sample["questions"],
                     "sparql": sparql,
+                    "raw_sparql": sample["origin"]["input"],
                 }
             )
 
@@ -130,7 +131,7 @@ def format_as_jsonl(samples: list[dict[str, Any]], split: str) -> list[dict[str,
                 "question": main_question,
                 "sparql": sample["sparql"],
                 "paraphrases": paraphrases,
-                "info": {},
+                "info": {"raw_sparql": sample["raw_sparql"]},
             }
         )
 
