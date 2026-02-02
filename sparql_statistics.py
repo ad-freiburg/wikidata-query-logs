@@ -8,29 +8,95 @@ from utils import load_sparql_parser, parse_sparql
 
 # Wikidata IRI base prefixes, sorted by length (longest first) for correct matching
 WIKIDATA_IRI_PREFIXES = [
-    ("http://www.wikidata.org/prop/direct-normalized/", "wdtn:"),
     ("http://www.wikidata.org/prop/statement/value-normalized/", "psn:"),
     ("http://www.wikidata.org/prop/qualifier/value-normalized/", "pqn:"),
     ("http://www.wikidata.org/prop/reference/value-normalized/", "prn:"),
-    ("http://www.wikidata.org/prop/direct/", "wdt:"),
+    ("http://www.wikidata.org/prop/direct-normalized/", "wdtn:"),
+    ("http://www.wikidata.org/prop/statement/value/", "psv:"),
+    ("http://www.wikidata.org/prop/qualifier/value/", "pqv:"),
+    ("http://www.wikidata.org/prop/reference/value/", "prv:"),
     ("http://www.wikidata.org/prop/statement/", "ps:"),
     ("http://www.wikidata.org/prop/qualifier/", "pq:"),
     ("http://www.wikidata.org/prop/reference/", "pr:"),
+    ("http://www.wikidata.org/entity/statement/", "s:"),
+    ("http://www.wikidata.org/prop/novalue/", "wdno:"),
+    ("http://www.wikidata.org/prop/direct/", "wdt:"),
+    ("http://www.wikidata.org/reference/", "ref:"),
     ("http://www.wikidata.org/entity/", "wd:"),
+    ("http://www.wikidata.org/value/", "v:"),
     ("http://www.wikidata.org/prop/", "p:"),
 ]
 
+# Default prefix map (standard Wikidata prefixes, as predefined by WDQS)
+DEFAULT_PREFIX_MAP = {prefix: base for base, prefix in WIKIDATA_IRI_PREFIXES}
 
-def get_iri_prefix(iri: str) -> str | None:
-    """Get the Wikidata prefix for an IRI, or None if not a Wikidata IRI."""
+
+WIKIDATA_BASE = "http://www.wikidata.org/"
+
+
+def get_wikidata_prefix(iri: str) -> str | None:
+    """
+    Get the canonical Wikidata prefix for an IRI, or None if not a Wikidata IRI.
+
+    Returns "other:" for Wikidata IRIs that don't match any known prefix.
+    """
     for base, prefix in WIKIDATA_IRI_PREFIXES:
         if iri.startswith(base):
             return prefix
+    # Check if it's still a Wikidata IRI (but with unknown prefix)
+    if iri.startswith(WIKIDATA_BASE):
+        return "other:"
     return None
 
 
-def collect_iris(tree: dict | list, iris_by_prefix: dict[str, set[str]]) -> None:
-    """Recursively collect Wikidata IRIs from the parse tree, grouped by prefix."""
+def extract_prefix_declarations(tree: dict | list) -> dict[str, str]:
+    """
+    Extract PREFIX declarations from the parse tree.
+
+    Returns a dict mapping prefix (e.g., "wd:") to base IRI (e.g., "http://www.wikidata.org/entity/").
+    Includes default Wikidata prefixes, which can be overridden by explicit declarations.
+    """
+    # Start with default Wikidata prefixes
+    prefix_map: dict[str, str] = DEFAULT_PREFIX_MAP.copy()
+
+    def visit(node: dict | list) -> None:
+        if isinstance(node, dict):
+            # Look for PrefixDecl which contains PNAME_NS and IRIREF
+            if node.get("name") == "PrefixDecl":
+                pname_ns = None
+                iri_ref = None
+                for child in node.get("children", []):
+                    if isinstance(child, dict):
+                        if child.get("name") == "PNAME_NS":
+                            pname_ns = child.get("value")  # e.g., "wd:"
+                        elif child.get("name") == "IRIREF":
+                            iri_ref = child.get("value")  # e.g., "<http://...>"
+                if pname_ns and iri_ref:
+                    # Strip angle brackets from IRI
+                    base_iri = iri_ref[1:-1]
+                    prefix_map[pname_ns] = base_iri
+
+            for child in node.get("children", []):
+                visit(child)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    visit(tree)
+    return prefix_map
+
+
+def collect_iris(
+    tree: dict | list,
+    iris_by_prefix: dict[str, set[str]],
+    query_prefix_map: dict[str, str],
+) -> None:
+    """
+    Recursively collect Wikidata IRIs from the parse tree, grouped by canonical prefix.
+
+    Uses query_prefix_map to resolve prefixed names (PNAME_LN) to full IRIs,
+    then classifies them by Wikidata prefix.
+    """
     if isinstance(tree, dict):
         name = tree.get("name")
         value = tree.get("value")
@@ -38,24 +104,32 @@ def collect_iris(tree: dict | list, iris_by_prefix: dict[str, set[str]]) -> None
         if name == "IRIREF" and value:
             # Full IRI like <http://...>, strip brackets
             iri = value[1:-1]
-            prefix = get_iri_prefix(iri)
+            prefix = get_wikidata_prefix(iri)
             if prefix:
                 iris_by_prefix[prefix].add(iri)
         elif name == "PNAME_LN" and value:
-            # Prefixed name like wd:Q42 or wdt:P31
-            for base, prefix in WIKIDATA_IRI_PREFIXES:
-                if value.startswith(prefix):
+            # Prefixed name like wd:Q42 or custom:Q42
+            # Find the prefix part (everything up to and including the colon)
+            colon_idx = value.find(":")
+            if colon_idx != -1:
+                query_prefix = value[: colon_idx + 1]  # e.g., "wd:" or "custom:"
+                local_name = value[colon_idx + 1 :]  # e.g., "Q42"
+
+                # Look up the base IRI from the query's PREFIX declarations
+                base_iri = query_prefix_map.get(query_prefix)
+                if base_iri:
                     # Expand to full IRI
-                    local_name = value[len(prefix) :]
-                    iri = base + local_name
-                    iris_by_prefix[prefix].add(iri)
-                    break
+                    full_iri = base_iri + local_name
+                    # Classify by canonical Wikidata prefix
+                    canonical_prefix = get_wikidata_prefix(full_iri)
+                    if canonical_prefix:
+                        iris_by_prefix[canonical_prefix].add(full_iri)
 
         for child in tree.get("children", []):
-            collect_iris(child, iris_by_prefix)
+            collect_iris(child, iris_by_prefix, query_prefix_map)
     elif isinstance(tree, list):
         for item in tree:
-            collect_iris(item, iris_by_prefix)
+            collect_iris(item, iris_by_prefix, query_prefix_map)
 
 
 def collect_present_nodes(tree: dict | list, present: set[str]) -> None:
@@ -108,10 +182,11 @@ def main() -> None:
     path_constructs = {"|", "/", "PathMod"}
     queries_with_paths = 0
 
-    # Track IRIs by prefix
+    # Track IRIs by prefix (including "other:" for unknown Wikidata prefixes)
     iris_by_prefix: dict[str, set[str]] = {
         prefix: set() for _, prefix in WIKIDATA_IRI_PREFIXES
     }
+    iris_by_prefix["other:"] = set()
 
     # Constructs we're interested in (terminals from sparql.l and rules from sparql.y)
     constructs_of_interest = [
@@ -186,8 +261,9 @@ def main() -> None:
             triple_count = count_node_occurrences(tree, "TriplesSameSubjectPath")
             triple_pattern_counts.append(triple_count)
 
-            # Collect IRIs by prefix
-            collect_iris(tree, iris_by_prefix)
+            # Extract PREFIX declarations and collect IRIs
+            query_prefix_map = extract_prefix_declarations(tree)
+            collect_iris(tree, iris_by_prefix, query_prefix_map)
 
         except Exception as e:
             print(f"SPARQL parse error: {e}", file=sys.stderr)
@@ -256,6 +332,21 @@ def main() -> None:
             count = len(iris_by_prefix[prefix])
             if count > 0:
                 print(f"  {prefix} {count:,}")
+        # Show "other:" count if any unknown Wikidata prefixes were found
+        other_count = len(iris_by_prefix["other:"])
+        if other_count > 0:
+            print(f"  other: {other_count:,}")
+            # Extract unique namespaces from "other" IRIs
+            other_namespaces: dict[str, int] = {}
+            for iri in iris_by_prefix["other:"]:
+                # Extract namespace (everything up to last / or #)
+                last_sep = max(iri.rfind("/"), iri.rfind("#"))
+                if last_sep > 0:
+                    namespace = iri[: last_sep + 1]
+                    other_namespaces[namespace] = other_namespaces.get(namespace, 0) + 1
+            print("    Namespaces in 'other':")
+            for ns, count in sorted(other_namespaces.items(), key=lambda x: -x[1]):
+                print(f"      {ns} ({count})")
 
 
 if __name__ == "__main__":

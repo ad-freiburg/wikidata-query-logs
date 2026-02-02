@@ -5,7 +5,8 @@ from sparql_statistics import (
     collect_iris,
     collect_present_nodes,
     count_node_occurrences,
-    get_iri_prefix,
+    extract_prefix_declarations,
+    get_wikidata_prefix,
 )
 from utils import load_sparql_parser, parse_sparql
 
@@ -301,41 +302,45 @@ class TestTriplePatternCounting:
         assert count == 3
 
 
-class TestGetIriPrefix:
+class TestGetWikidataPrefix:
     def test_entity_iri(self):
         """Entity IRI should return wd: prefix."""
-        assert get_iri_prefix("http://www.wikidata.org/entity/Q42") == "wd:"
+        assert get_wikidata_prefix("http://www.wikidata.org/entity/Q42") == "wd:"
 
     def test_prop_direct_iri(self):
         """prop/direct IRI should return wdt: prefix."""
-        assert get_iri_prefix("http://www.wikidata.org/prop/direct/P31") == "wdt:"
+        assert get_wikidata_prefix("http://www.wikidata.org/prop/direct/P31") == "wdt:"
 
     def test_prop_statement_iri(self):
         """prop/statement IRI should return ps: prefix."""
-        assert get_iri_prefix("http://www.wikidata.org/prop/statement/P31") == "ps:"
+        assert get_wikidata_prefix("http://www.wikidata.org/prop/statement/P31") == "ps:"
 
     def test_prop_statement_normalized_iri(self):
         """prop/statement/value-normalized should return psn: (not ps:)."""
         assert (
-            get_iri_prefix("http://www.wikidata.org/prop/statement/value-normalized/P31")
+            get_wikidata_prefix("http://www.wikidata.org/prop/statement/value-normalized/P31")
             == "psn:"
         )
 
     def test_prop_qualifier_iri(self):
         """prop/qualifier IRI should return pq: prefix."""
-        assert get_iri_prefix("http://www.wikidata.org/prop/qualifier/P585") == "pq:"
+        assert get_wikidata_prefix("http://www.wikidata.org/prop/qualifier/P585") == "pq:"
 
     def test_prop_qualifier_normalized_iri(self):
         """prop/qualifier/value-normalized should return pqn: (not pq:)."""
         assert (
-            get_iri_prefix("http://www.wikidata.org/prop/qualifier/value-normalized/P585")
+            get_wikidata_prefix("http://www.wikidata.org/prop/qualifier/value-normalized/P585")
             == "pqn:"
         )
 
+    def test_statement_iri(self):
+        """entity/statement IRI should return s: prefix (not wd:)."""
+        assert get_wikidata_prefix("http://www.wikidata.org/entity/statement/Q42-abc123") == "s:"
+
     def test_non_wikidata_iri(self):
         """Non-Wikidata IRIs should return None."""
-        assert get_iri_prefix("http://www.w3.org/2000/01/rdf-schema#label") is None
-        assert get_iri_prefix("http://schema.org/name") is None
+        assert get_wikidata_prefix("http://www.w3.org/2000/01/rdf-schema#label") is None
+        assert get_wikidata_prefix("http://schema.org/name") is None
 
 
 def get_iris_by_prefix(query: str, parser) -> dict[str, set[str]]:
@@ -344,7 +349,9 @@ def get_iris_by_prefix(query: str, parser) -> dict[str, set[str]]:
     iris_by_prefix: dict[str, set[str]] = {
         prefix: set() for _, prefix in WIKIDATA_IRI_PREFIXES
     }
-    collect_iris(tree, iris_by_prefix)
+    iris_by_prefix["other:"] = set()
+    query_prefix_map = extract_prefix_declarations(tree)
+    collect_iris(tree, iris_by_prefix, query_prefix_map)
     return iris_by_prefix
 
 
@@ -398,3 +405,122 @@ class TestCollectIris:
         assert "http://www.wikidata.org/prop/statement/value-normalized/P569" in iris["psn:"]
         assert len(iris["ps:"]) == 1
         assert len(iris["psn:"]) == 1
+
+    def test_statement_prefix(self, parser):
+        """s: prefix should be collected under s: (not wd:)."""
+        iris = get_iris_by_prefix(
+            "PREFIX s: <http://www.wikidata.org/entity/statement/> "
+            "SELECT ?x WHERE { ?s s:Q42-abc123 ?x }",
+            parser,
+        )
+        assert "http://www.wikidata.org/entity/statement/Q42-abc123" in iris["s:"]
+        assert len(iris["wd:"]) == 0
+
+
+class TestExtractPrefixDeclarations:
+    def test_single_prefix(self, parser):
+        """Single PREFIX declaration should be extracted."""
+        tree = parse_sparql(
+            "PREFIX wd: <http://www.wikidata.org/entity/> SELECT ?x WHERE { ?x ?p ?o }",
+            parser,
+        )
+        prefix_map = extract_prefix_declarations(tree)
+        assert prefix_map.get("wd:") == "http://www.wikidata.org/entity/"
+
+    def test_multiple_prefixes(self, parser):
+        """Multiple PREFIX declarations should be extracted."""
+        tree = parse_sparql(
+            "PREFIX wd: <http://www.wikidata.org/entity/> "
+            "PREFIX wdt: <http://www.wikidata.org/prop/direct/> "
+            "SELECT ?x WHERE { ?x ?p ?o }",
+            parser,
+        )
+        prefix_map = extract_prefix_declarations(tree)
+        assert prefix_map.get("wd:") == "http://www.wikidata.org/entity/"
+        assert prefix_map.get("wdt:") == "http://www.wikidata.org/prop/direct/"
+
+    def test_custom_prefix_name(self, parser):
+        """Custom prefix names should be extracted."""
+        tree = parse_sparql(
+            "PREFIX entity: <http://www.wikidata.org/entity/> "
+            "SELECT ?x WHERE { ?x ?p ?o }",
+            parser,
+        )
+        prefix_map = extract_prefix_declarations(tree)
+        assert prefix_map.get("entity:") == "http://www.wikidata.org/entity/"
+
+    def test_no_prefixes(self, parser):
+        """Query without PREFIX declarations should return default Wikidata prefixes."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x ?p ?o }", parser)
+        prefix_map = extract_prefix_declarations(tree)
+        # Should contain default Wikidata prefixes
+        assert "wd:" in prefix_map
+        assert "wdt:" in prefix_map
+        assert prefix_map["wd:"] == "http://www.wikidata.org/entity/"
+
+
+class TestCustomPrefixDeclarations:
+    def test_custom_entity_prefix(self, parser):
+        """Custom prefix for wd: namespace should be resolved correctly."""
+        iris = get_iris_by_prefix(
+            "PREFIX entity: <http://www.wikidata.org/entity/> "
+            "SELECT ?x WHERE { entity:Q42 ?p ?x }",
+            parser,
+        )
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+
+    def test_custom_property_prefix(self, parser):
+        """Custom prefix for wdt: namespace should be resolved correctly."""
+        iris = get_iris_by_prefix(
+            "PREFIX prop: <http://www.wikidata.org/prop/direct/> "
+            "SELECT ?x WHERE { ?s prop:P31 ?x }",
+            parser,
+        )
+        assert "http://www.wikidata.org/prop/direct/P31" in iris["wdt:"]
+
+    def test_mixed_standard_and_custom_prefixes(self, parser):
+        """Standard and custom prefixes in same query should both work."""
+        iris = get_iris_by_prefix(
+            "PREFIX entity: <http://www.wikidata.org/entity/> "
+            "PREFIX wdt: <http://www.wikidata.org/prop/direct/> "
+            "SELECT ?x WHERE { entity:Q42 wdt:P31 ?x }",
+            parser,
+        )
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+        assert "http://www.wikidata.org/prop/direct/P31" in iris["wdt:"]
+
+    def test_prefix_not_declared_not_collected(self, parser):
+        """Prefixed names without matching PREFIX declaration should not be collected."""
+        iris = get_iris_by_prefix(
+            "SELECT ?x WHERE { undeclared:Q42 ?p ?x }",
+            parser,
+        )
+        # undeclared:Q42 has no PREFIX declaration, so it shouldn't be resolved
+        total_iris = sum(len(s) for s in iris.values())
+        assert total_iris == 0
+
+    def test_swapped_wd_wdt_prefixes(self, parser):
+        """Swapped prefix names should still resolve to correct canonical prefixes."""
+        # Here we declare wd: to point to prop/direct (normally wdt:)
+        # and wdt: to point to entity (normally wd:)
+        iris = get_iris_by_prefix(
+            "PREFIX wd: <http://www.wikidata.org/prop/direct/> "
+            "PREFIX wdt: <http://www.wikidata.org/entity/> "
+            "SELECT ?x WHERE { wdt:Q42 wd:P31 ?x }",
+            parser,
+        )
+        # wdt:Q42 resolves to entity/Q42, should be classified as wd:
+        assert "http://www.wikidata.org/entity/Q42" in iris["wd:"]
+        # wd:P31 resolves to prop/direct/P31, should be classified as wdt:
+        assert "http://www.wikidata.org/prop/direct/P31" in iris["wdt:"]
+
+    def test_unknown_wikidata_prefix_counted_as_other(self, parser):
+        """Unknown Wikidata IRIs should be counted under 'other:'."""
+        iris = get_iris_by_prefix(
+            "SELECT ?x WHERE { <http://www.wikidata.org/unknown/namespace/X123> ?p ?x }",
+            parser,
+        )
+        assert "http://www.wikidata.org/unknown/namespace/X123" in iris["other:"]
+        # Should still be counted in total
+        total_iris = sum(len(s) for s in iris.values())
+        assert total_iris == 1
