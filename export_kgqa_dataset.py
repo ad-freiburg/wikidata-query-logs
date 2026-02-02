@@ -157,14 +157,14 @@ def main() -> None:
     parser.add_argument(
         "--train-ratio",
         type=float,
-        default=0.7,
-        help="Ratio of clusters for training (default: 0.7)",
+        default=0.8,
+        help="Ratio of clusters for training (default: 0.8)",
     )
     parser.add_argument(
         "--val-ratio",
         type=float,
-        default=0.15,
-        help="Ratio of clusters for validation (default: 0.15)",
+        default=0.1,
+        help="Ratio of clusters for validation (default: 0.1)",
     )
     parser.add_argument(
         "--seed",
