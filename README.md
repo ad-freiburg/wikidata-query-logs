@@ -57,8 +57,7 @@ the corresponding steps in the pipeline below.
 mkdir -p data
 pip install -r requirements.txt
 ```
-```
-```
+
 
 ### 1. Prepare input from query logs
 
