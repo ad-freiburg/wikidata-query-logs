@@ -7,6 +7,8 @@ from sparql_statistics import (
     count_node_occurrences,
     extract_prefix_declarations,
     get_wikidata_prefix,
+    normalize_tree,
+    tree_to_canonical_string,
 )
 from utils import load_sparql_parser, parse_sparql
 
@@ -524,3 +526,223 @@ class TestCustomPrefixDeclarations:
         # Should still be counted in total
         total_iris = sum(len(s) for s in iris.values())
         assert total_iris == 1
+
+
+def normalize_query(query: str, parser, normalize_properties: bool = False) -> str:
+    """Helper to parse, normalize, and convert query to canonical string."""
+    tree = parse_sparql(query, parser)
+    normalized = normalize_tree(tree, normalize_properties=normalize_properties)
+    return tree_to_canonical_string(normalized)
+
+
+class TestNormalizeTreeVariables:
+    def test_single_variable_normalized(self, parser):
+        """A single variable should be normalized to ?var0."""
+        canonical = normalize_query("SELECT ?x WHERE { ?x ?p ?o }", parser)
+        assert "?var0" in canonical
+        assert "?x" not in canonical
+
+    def test_multiple_variables_get_different_placeholders(self, parser):
+        """Different variables should get different placeholders."""
+        canonical = normalize_query("SELECT ?x ?y WHERE { ?x ?p ?y }", parser)
+        assert "?var0" in canonical
+        assert "?var1" in canonical
+        # At least 3 unique vars: ?x, ?y, and one of ?p/?o
+        # (depends on parsing, but should have multiple)
+
+    def test_same_variable_same_placeholder(self, parser):
+        """Same variable appearing twice should get same placeholder."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x <http://a> ?y . ?x <http://b> ?z }", parser)
+        normalized = normalize_tree(tree, normalize_properties=False)
+        canonical = tree_to_canonical_string(normalized)
+        # Count occurrences of ?var0 - should appear twice (for both ?x occurrences)
+        count_var0 = canonical.count("?var0")
+        assert count_var0 >= 2, f"Expected ?var0 to appear at least twice, got {count_var0}"
+
+
+class TestNormalizeTreeEntities:
+    def test_wd_entity_normalized(self, parser):
+        """wd: entities should be normalized to wd:E0, wd:E1, etc."""
+        canonical = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }", parser)
+        assert "wd:E0" in canonical
+        assert "Q42" not in canonical
+
+    def test_same_entity_same_placeholder(self, parser):
+        """Same entity appearing twice should get same placeholder."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x . wd:Q42 wdt:P27 ?y }",
+            parser,
+        )
+        normalized = normalize_tree(tree, normalize_properties=False)
+        canonical = tree_to_canonical_string(normalized)
+        # wd:Q42 appears twice, should both become wd:E0
+        count_e0 = canonical.count("wd:E0")
+        assert count_e0 >= 2, f"Expected wd:E0 to appear at least twice, got {count_e0}"
+
+    def test_different_entities_different_placeholders(self, parser):
+        """Different entities should get different placeholders."""
+        canonical = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 wd:Q5 }",
+            parser,
+        )
+        assert "wd:E0" in canonical
+        assert "wd:E1" in canonical
+
+    def test_statement_entity_normalized(self, parser):
+        """s: (statement) entities should be normalized."""
+        canonical = normalize_query(
+            "PREFIX s: <http://www.wikidata.org/entity/statement/> "
+            "SELECT ?x WHERE { ?s s:Q42-abc123 ?x }",
+            parser,
+        )
+        assert "s:E" in canonical
+        assert "Q42-abc123" not in canonical
+
+
+class TestNormalizeTreeLiterals:
+    def test_string_literal_normalized(self, parser):
+        """String literals should be normalized."""
+        canonical = normalize_query(
+            'SELECT ?x WHERE { ?x <http://label> "Albert Einstein" }',
+            parser,
+        )
+        assert '"lit0"' in canonical
+        assert "Albert Einstein" not in canonical
+
+    def test_integer_literal_normalized(self, parser):
+        """Integer literals should be normalized to 0."""
+        canonical = normalize_query(
+            "SELECT ?x WHERE { ?x <http://age> 42 }",
+            parser,
+        )
+        # The literal should be normalized
+        assert "42" not in canonical or canonical.count("42") == 0
+
+
+class TestNormalizeTreeProperties:
+    def test_properties_kept_by_default(self, parser):
+        """Properties should NOT be normalized when normalize_properties=False."""
+        canonical = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
+            parser,
+            normalize_properties=False,
+        )
+        assert "wdt:P31" in canonical
+        assert "wdt:P0" not in canonical
+
+    def test_properties_normalized_when_enabled(self, parser):
+        """Properties should be normalized when normalize_properties=True."""
+        canonical = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
+            parser,
+            normalize_properties=True,
+        )
+        assert "wdt:P0" in canonical
+        assert "P31" not in canonical
+
+    def test_same_property_same_placeholder(self, parser):
+        """Same property appearing twice should get same placeholder."""
+        tree = parse_sparql(
+            "SELECT ?x ?y WHERE { wd:Q42 wdt:P31 ?x . wd:Q5 wdt:P31 ?y }",
+            parser,
+        )
+        normalized = normalize_tree(tree, normalize_properties=True)
+        canonical = tree_to_canonical_string(normalized)
+        # wdt:P31 appears twice, should both become wdt:P0
+        count_p0 = canonical.count("wdt:P0")
+        assert count_p0 >= 2, f"Expected wdt:P0 to appear at least twice, got {count_p0}"
+
+    def test_different_properties_different_placeholders(self, parser):
+        """Different properties should get different placeholders."""
+        canonical = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x . wd:Q42 wdt:P27 ?y }",
+            parser,
+            normalize_properties=True,
+        )
+        assert "wdt:P0" in canonical
+        assert "wdt:P1" in canonical
+
+    def test_different_property_prefixes_shared_counter(self, parser):
+        """Different property prefixes share a counter (p:P31 -> p:P0, ps:P31 -> ps:P1)."""
+        canonical = normalize_query(
+            "SELECT ?x WHERE { ?s p:P31 ?stmt . ?stmt ps:P31 ?x }",
+            parser,
+            normalize_properties=True,
+        )
+        # Properties use a shared counter, so first property gets P0, second gets P1
+        assert "p:P0" in canonical
+        assert "ps:P1" in canonical
+
+
+class TestTreeToCanonicalString:
+    def test_deterministic_output(self, parser):
+        """Same query should always produce same canonical string."""
+        query = "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }"
+        canonical1 = normalize_query(query, parser)
+        canonical2 = normalize_query(query, parser)
+        assert canonical1 == canonical2
+
+    def test_different_queries_different_output(self, parser):
+        """Different queries should produce different canonical strings."""
+        canonical1 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }", parser)
+        canonical2 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P27 ?x }", parser)
+        # With properties kept, these should be different
+        assert canonical1 != canonical2
+
+
+class TestQueryPatternDeduplication:
+    def test_same_structure_different_entities_same_pattern(self, parser):
+        """Queries with same structure but different entities should have same normalized pattern."""
+        canonical1 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }", parser)
+        canonical2 = normalize_query("SELECT ?x WHERE { wd:Q5 wdt:P31 ?x }", parser)
+        # Same pattern (same property), just different entity
+        assert canonical1 == canonical2
+
+    def test_same_structure_different_properties_different_pattern(self, parser):
+        """Queries with different properties should have different patterns (when keeping properties)."""
+        canonical1 = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
+            parser,
+            normalize_properties=False,
+        )
+        canonical2 = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P27 ?x }",
+            parser,
+            normalize_properties=False,
+        )
+        assert canonical1 != canonical2
+
+    def test_same_structure_different_properties_same_pattern_when_normalized(self, parser):
+        """Queries with different properties should have same pattern when normalizing properties."""
+        canonical1 = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
+            parser,
+            normalize_properties=True,
+        )
+        canonical2 = normalize_query(
+            "SELECT ?x WHERE { wd:Q5 wdt:P27 ?x }",
+            parser,
+            normalize_properties=True,
+        )
+        assert canonical1 == canonical2
+
+    def test_different_structure_different_pattern(self, parser):
+        """Queries with different structure should have different patterns."""
+        canonical1 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }", parser)
+        canonical2 = normalize_query(
+            "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x . ?x wdt:P31 ?y }",
+            parser,
+        )
+        assert canonical1 != canonical2
+
+    def test_variable_names_dont_affect_pattern(self, parser):
+        """Different variable names should not affect the pattern."""
+        canonical1 = normalize_query("SELECT ?x WHERE { ?x wdt:P31 ?y }", parser)
+        canonical2 = normalize_query("SELECT ?a WHERE { ?a wdt:P31 ?b }", parser)
+        assert canonical1 == canonical2
+
+    def test_entity_values_dont_affect_pattern(self, parser):
+        """Different entity values should not affect the pattern."""
+        canonical1 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 wd:Q5 }", parser)
+        canonical2 = normalize_query("SELECT ?x WHERE { wd:Q100 wdt:P31 wd:Q200 }", parser)
+        assert canonical1 == canonical2

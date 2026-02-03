@@ -132,6 +132,159 @@ def collect_iris(
             collect_iris(item, iris_by_prefix, query_prefix_map)
 
 
+def normalize_tree(
+    tree: dict | list,
+    normalize_properties: bool = False,
+    var_map: dict[str, str] | None = None,
+    entity_map: dict[str, str] | None = None,
+    property_map: dict[str, str] | None = None,
+    literal_counter: list[int] | None = None,
+) -> dict | list:
+    """
+    Normalize a SPARQL parse tree by replacing:
+    - Variables with ?var0, ?var1, ... (preserving binding structure)
+    - Entity IRIs (wd:Qxxx) with wd:E0, wd:E1, ...
+    - Literals with "lit0", "lit1", ...
+    - Optionally property IRIs with wdt:P0, p:P0, etc.
+
+    The same original value always maps to the same placeholder within a query,
+    preserving the structure (e.g., if ?x appears twice, both become ?var0).
+
+    Returns a new normalized tree (does not modify original).
+    """
+    if var_map is None:
+        var_map = {}
+    if entity_map is None:
+        entity_map = {}
+    if property_map is None:
+        property_map = {}
+    if literal_counter is None:
+        literal_counter = [0]  # Use list to allow mutation in nested calls
+
+    # Property prefixes (for normalization)
+    property_prefixes = {"wdt:", "p:", "ps:", "pq:", "pr:", "psv:", "pqv:", "prv:", "psn:", "pqn:", "prn:", "wdtn:", "wdno:"}
+    # Entity prefixes
+    entity_prefixes = {"wd:", "s:", "ref:", "v:"}
+
+    if isinstance(tree, dict):
+        name = tree.get("name")
+        value = tree.get("value")
+        new_node: dict = {"name": name}
+
+        if name == "VAR1" or name == "VAR2":
+            # Variable like ?x or $x - same variable always gets same placeholder
+            if value not in var_map:
+                var_map[value] = f"?var{len(var_map)}"
+            new_node["value"] = var_map[value]
+        elif name == "PNAME_LN" and value:
+            # Prefixed name like wd:Q42 or wdt:P31
+            colon_idx = value.find(":")
+            if colon_idx != -1:
+                prefix = value[: colon_idx + 1]
+                local = value[colon_idx + 1:]
+
+                if prefix in entity_prefixes:
+                    # Entity IRI - same entity always gets same placeholder
+                    if value not in entity_map:
+                        entity_map[value] = f"{prefix}E{len(entity_map)}"
+                    new_node["value"] = entity_map[value]
+                elif prefix in property_prefixes:
+                    if normalize_properties:
+                        # Property IRI - same property always gets same placeholder
+                        if value not in property_map:
+                            property_map[value] = f"{prefix}P{len(property_map)}"
+                        new_node["value"] = property_map[value]
+                    else:
+                        # Keep property IRIs as-is
+                        new_node["value"] = value
+                else:
+                    # Other prefixed names - keep as-is
+                    new_node["value"] = value
+            else:
+                new_node["value"] = value
+        elif name == "IRIREF" and value:
+            # Full IRI like <http://...>
+            iri = value[1:-1]  # Strip angle brackets
+            wd_prefix = get_wikidata_prefix(iri)
+            if wd_prefix:
+                # Convert to prefixed form for normalization
+                for base, prefix in WIKIDATA_IRI_PREFIXES:
+                    if iri.startswith(base):
+                        local = iri[len(base):]
+                        prefixed = f"{prefix}{local}"
+
+                        if prefix in entity_prefixes:
+                            # Same entity always gets same placeholder
+                            if prefixed not in entity_map:
+                                entity_map[prefixed] = f"{prefix}E{len(entity_map)}"
+                            new_node["value"] = f"<{entity_map[prefixed]}>"
+                        elif prefix in property_prefixes:
+                            if normalize_properties:
+                                # Same property always gets same placeholder
+                                if prefixed not in property_map:
+                                    property_map[prefixed] = f"{prefix}P{len(property_map)}"
+                                new_node["value"] = f"<{property_map[prefixed]}>"
+                            else:
+                                new_node["value"] = value
+                        else:
+                            new_node["value"] = value
+                        break
+                else:
+                    new_node["value"] = value
+            else:
+                # Non-Wikidata IRI - keep as-is
+                new_node["value"] = value
+        elif name in ("STRING_LITERAL1", "STRING_LITERAL2", "STRING_LITERAL_LONG1", "STRING_LITERAL_LONG2"):
+            # String literal - each gets unique placeholder (literals typically don't repeat with same meaning)
+            new_node["value"] = f'"lit{literal_counter[0]}"'
+            literal_counter[0] += 1
+        elif name in ("INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "INTEGER_NEGATIVE",
+                      "DECIMAL_POSITIVE", "DECIMAL_NEGATIVE", "DOUBLE_POSITIVE", "DOUBLE_NEGATIVE"):
+            # Numeric literal
+            new_node["value"] = "0"
+        elif value is not None:
+            new_node["value"] = value
+
+        if "children" in tree:
+            new_node["children"] = [
+                normalize_tree(child, normalize_properties, var_map, entity_map, property_map, literal_counter)
+                for child in tree["children"]
+            ]
+
+        return new_node
+    elif isinstance(tree, list):
+        return [
+            normalize_tree(item, normalize_properties, var_map, entity_map, property_map, literal_counter)
+            for item in tree
+        ]
+    else:
+        return tree
+
+
+def tree_to_canonical_string(tree: dict | list) -> str:
+    """
+    Convert a parse tree to a canonical string representation for deduplication.
+    This creates a deterministic string from the tree structure.
+    """
+    if isinstance(tree, dict):
+        name = tree.get("name", "")
+        value = tree.get("value", "")
+        children = tree.get("children", [])
+
+        if children:
+            children_str = ",".join(tree_to_canonical_string(c) for c in children)
+            if value:
+                return f"{name}[{value}]({children_str})"
+            return f"{name}({children_str})"
+        elif value:
+            return f"{name}[{value}]"
+        return name
+    elif isinstance(tree, list):
+        return "[" + ",".join(tree_to_canonical_string(item) for item in tree) + "]"
+    else:
+        return str(tree)
+
+
 def collect_present_nodes(tree: dict | list, present: set[str]) -> None:
     """Recursively collect node names present in the parse tree."""
     if isinstance(tree, dict):
@@ -187,6 +340,10 @@ def main() -> None:
         prefix: set() for _, prefix in WIKIDATA_IRI_PREFIXES
     }
     iris_by_prefix["other:"] = set()
+
+    # Track unique normalized query patterns
+    unique_patterns_keep_props: set[str] = set()  # Normalize entities/literals, keep properties
+    unique_patterns_norm_props: set[str] = set()  # Normalize everything including properties
 
     # Constructs we're interested in (terminals from sparql.l and rules from sparql.y)
     constructs_of_interest = [
@@ -264,6 +421,17 @@ def main() -> None:
             # Extract PREFIX declarations and collect IRIs
             query_prefix_map = extract_prefix_declarations(tree)
             collect_iris(tree, iris_by_prefix, query_prefix_map)
+
+            # Normalize and track unique patterns
+            # Mode 1: Keep properties, normalize entities/variables/literals
+            normalized_keep_props = normalize_tree(tree, normalize_properties=False)
+            canonical_keep_props = tree_to_canonical_string(normalized_keep_props)
+            unique_patterns_keep_props.add(canonical_keep_props)
+
+            # Mode 2: Normalize everything including properties
+            normalized_norm_props = normalize_tree(tree, normalize_properties=True)
+            canonical_norm_props = tree_to_canonical_string(normalized_norm_props)
+            unique_patterns_norm_props.add(canonical_norm_props)
 
         except Exception as e:
             print(f"SPARQL parse error: {e}", file=sys.stderr)
@@ -347,6 +515,21 @@ def main() -> None:
             print("    Namespaces in 'other':")
             for ns, count in sorted(other_namespaces.items(), key=lambda x: -x[1]):
                 print(f"      {ns} ({count})")
+
+        # Unique query patterns
+        print(f"\n{'-' * 60}")
+        print("Unique Query Patterns (after normalization):")
+        print(f"{'-' * 60}")
+
+        n_keep = len(unique_patterns_keep_props)
+        n_norm = len(unique_patterns_norm_props)
+        pct_keep = n_keep / successfully_parsed * 100
+        pct_norm = n_norm / successfully_parsed * 100
+
+        print(f"  Keeping properties (normalize entities/vars/literals):")
+        print(f"    Unique patterns: {n_keep:,} ({pct_keep:.1f}% of queries)")
+        print(f"  Normalizing properties (normalize everything):")
+        print(f"    Unique patterns: {n_norm:,} ({pct_norm:.1f}% of queries)")
 
 
 if __name__ == "__main__":
