@@ -3,6 +3,8 @@ import pytest
 from sparql_statistics import (
     WIKIDATA_IRI_PREFIXES,
     collect_iris,
+    collect_languages,
+    collect_literals,
     collect_present_nodes,
     count_node_occurrences,
     extract_prefix_declarations,
@@ -746,3 +748,139 @@ class TestQueryPatternDeduplication:
         canonical1 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 wd:Q5 }", parser)
         canonical2 = normalize_query("SELECT ?x WHERE { wd:Q100 wdt:P31 wd:Q200 }", parser)
         assert canonical1 == canonical2
+
+
+def get_literals(query: str, parser) -> tuple[set[str], set[str]]:
+    """Helper: returns (string_literals, numeric_literals) for a query."""
+    tree = parse_sparql(query, parser)
+    strings: set[str] = set()
+    numbers: set[str] = set()
+    collect_literals(tree, strings, numbers)
+    return strings, numbers
+
+
+def get_languages(query: str, parser) -> set[str]:
+    """Helper: returns set of languages found in a query."""
+    tree = parse_sparql(query, parser)
+    languages: set[str] = set()
+    collect_languages(tree, languages)
+    return languages
+
+
+class TestCollectLiterals:
+    def test_string_literal(self, parser):
+        strings, numbers = get_literals(
+            'SELECT ?x WHERE { ?x <http://a> "hello" }', parser
+        )
+        assert '"hello"' in strings
+        assert len(numbers) == 0
+
+    def test_integer_literal(self, parser):
+        strings, numbers = get_literals(
+            "SELECT ?x WHERE { ?x <http://a> 42 }", parser
+        )
+        assert "42" in numbers
+        assert len(strings) == 0
+
+    def test_decimal_literal(self, parser):
+        strings, numbers = get_literals(
+            "SELECT ?x WHERE { ?x <http://a> 3.14 }", parser
+        )
+        assert "3.14" in numbers
+
+    def test_multiple_literals_deduplicated(self, parser):
+        """Same literal appearing twice should be counted once."""
+        strings, numbers = get_literals(
+            'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> "hello" }', parser
+        )
+        assert len(strings) == 1
+
+    def test_multiple_different_literals(self, parser):
+        strings, numbers = get_literals(
+            'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> "world" . ?x <http://c> 42 }',
+            parser,
+        )
+        assert len(strings) == 2
+        assert len(numbers) == 1
+
+    def test_language_tagged_string_collected(self, parser):
+        """The string part of a lang-tagged literal should still be collected."""
+        strings, numbers = get_literals(
+            'SELECT ?x WHERE { ?x <http://a> "hello"@en }', parser
+        )
+        assert '"hello"' in strings
+
+    def test_typed_literal_string_collected(self, parser):
+        """The string part of a typed literal (e.g. xsd:date) should be collected."""
+        strings, numbers = get_literals(
+            'SELECT ?x WHERE { ?x <http://a> "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#date> }',
+            parser,
+        )
+        assert '"2024-01-01"' in strings
+
+    def test_no_literals(self, parser):
+        strings, numbers = get_literals(
+            "SELECT ?x WHERE { ?x <http://a> ?y }", parser
+        )
+        assert len(strings) == 0
+        assert len(numbers) == 0
+
+
+class TestCollectLanguages:
+    def test_langtag(self, parser):
+        """Language from LANGTAG on a literal."""
+        langs = get_languages('SELECT ?x WHERE { ?x <http://a> "hello"@en }', parser)
+        assert "en" in langs
+
+    def test_langtag_case_insensitive(self, parser):
+        """LANGTAG should be lowercased."""
+        langs = get_languages('SELECT ?x WHERE { ?x <http://a> "hello"@EN }', parser)
+        assert "en" in langs
+
+    def test_langtag_with_sublang(self, parser):
+        """Language subtag like en-US should be preserved (lowercased)."""
+        langs = get_languages('SELECT ?x WHERE { ?x <http://a> "hello"@en-US }', parser)
+        assert "en-us" in langs
+
+    def test_lang_filter_equality(self, parser):
+        """Language from FILTER(LANG(?x) = "en")."""
+        langs = get_languages(
+            'SELECT ?x WHERE { ?x <http://a> ?label . FILTER(LANG(?label) = "en") }',
+            parser,
+        )
+        assert "en" in langs
+
+    def test_langmatches(self, parser):
+        """Language from LANGMATCHES(LANG(?x), "en*") - should strip trailing *."""
+        langs = get_languages(
+            'SELECT ?x WHERE { ?x <http://a> ?label . FILTER(LANGMATCHES(LANG(?label), "en*")) }',
+            parser,
+        )
+        assert "en" in langs
+
+    def test_langmatches_exact(self, parser):
+        """LANGMATCHES without wildcard."""
+        langs = get_languages(
+            'SELECT ?x WHERE { ?x <http://a> ?label . FILTER(LANGMATCHES(LANG(?label), "fr")) }',
+            parser,
+        )
+        assert "fr" in langs
+
+    def test_multiple_languages(self, parser):
+        """Multiple language sources in same query."""
+        langs = get_languages(
+            'SELECT ?x ?y WHERE { '
+            '?x <http://a> "hello"@en . '
+            '?x <http://b> ?label . FILTER(LANG(?label) = "de") '
+            '}',
+            parser,
+        )
+        assert "en" in langs
+        assert "de" in langs
+
+    def test_no_language(self, parser):
+        """Query without any language constructs."""
+        langs = get_languages(
+            "SELECT ?x WHERE { ?x <http://a> ?y }", parser
+        )
+        assert len(langs) == 0

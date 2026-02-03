@@ -15,16 +15,16 @@ Each line in these files is a JSON object with the following structure:
 
 ```jsonc
 {
-  "id": "train_38222",
-  "question": "List all Wikipedia language editions and their ISO 639 language codes.",
-  "sparql": "SELECT ?wikipediaEdition ?languageCode WHERE { ?wikipediaEdition wdt:P31 wd:Q10876391 . OPTIONAL { ?wikipediaEdition wdt:P424 ?languageCode . } }",
+  "id": "train_132930",
+  "question": "Works by Victor Hugo with French title \"Les Misérables\"",
+  "sparql": "SELECT ?work WHERE { ?work wdt:P50 ?author . ?author rdfs:label \"Victor Hugo\"@fr . ?work wdt:P1476 \"Les Misérables\"@fr . }",
   "paraphrases": [
-    "What are the language codes for each Wikipedia language edition?",
-    "Show me the names of all Wikipedia language editions along with the corresponding Wikimedia language codes used to identify them."
+    "What works authored by Victor Hugo have the French title \"Les Misérables\"?",
+    "List all works written by Victor Hugo that are titled \"Les Misérables\" in French."
   ],
   "info": {
-    // Original SPARQL query from the Wikidata SPARQL Logs
-    "raw_sparql": "SELECT ?var1 ?var2 WHERE { ?var1 <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q10876391> . OPTIONAL { ?var1 <http://www.wikidata.org/prop/direct/P424> ?var2 . } }"
+    // Original SPARQL query from the query logs
+    "raw_sparql": "SELECT ?var1 WHERE { ?var1 <http://www.wikidata.org/prop/direct/P50> ?var2 . ?var2 <http://www.w3.org/2000/01/rdf-schema#label> \"string1\"@fr . ?var1 <http://www.wikidata.org/prop/direct/P1476> ?var3 . ?var3 <http://www.w3.org/2000/01/rdf-schema#label> \"string2\"@fr . }"
   }
 }
 ```

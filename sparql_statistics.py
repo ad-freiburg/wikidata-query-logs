@@ -132,6 +132,126 @@ def collect_iris(
             collect_iris(item, iris_by_prefix, query_prefix_map)
 
 
+STRING_LITERAL_NODES = {"STRING_LITERAL1", "STRING_LITERAL2", "STRING_LITERAL_LONG1", "STRING_LITERAL_LONG2"}
+NUMERIC_LITERAL_NODES = {"INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "INTEGER_NEGATIVE",
+                         "DECIMAL_POSITIVE", "DECIMAL_NEGATIVE", "DOUBLE_POSITIVE", "DOUBLE_NEGATIVE"}
+
+
+def collect_literals(tree: dict | list, string_literals: set[str], numeric_literals: set[str]) -> None:
+    """Recursively collect unique string and numeric literals from the parse tree."""
+    if isinstance(tree, dict):
+        name = tree.get("name")
+        value = tree.get("value")
+        if name in STRING_LITERAL_NODES and value:
+            string_literals.add(value)
+        elif name in NUMERIC_LITERAL_NODES and value:
+            numeric_literals.add(value)
+        for child in tree.get("children", []):
+            collect_literals(child, string_literals, numeric_literals)
+    elif isinstance(tree, list):
+        for item in tree:
+            collect_literals(item, string_literals, numeric_literals)
+
+
+def _extract_string_from_subtree(tree: dict | list) -> str | None:
+    """Find and return the first STRING_LITERAL value in a subtree, or None."""
+    if isinstance(tree, dict):
+        if tree.get("name") in STRING_LITERAL_NODES:
+            return tree.get("value")
+        for child in tree.get("children", []):
+            result = _extract_string_from_subtree(child)
+            if result is not None:
+                return result
+    elif isinstance(tree, list):
+        for item in tree:
+            result = _extract_string_from_subtree(item)
+            if result is not None:
+                return result
+    return None
+
+
+def _has_lang_builtin(tree: dict | list) -> bool:
+    """Check if a subtree contains a LANG BuiltInCall."""
+    if isinstance(tree, dict):
+        if tree.get("name") == "BuiltInCall":
+            children = tree.get("children", [])
+            if children and isinstance(children[0], dict) and children[0].get("name") == "LANG":
+                return True
+        for child in tree.get("children", []):
+            if _has_lang_builtin(child):
+                return True
+    elif isinstance(tree, list):
+        for item in tree:
+            if _has_lang_builtin(item):
+                return True
+    return False
+
+
+def _strip_literal_quotes(value: str) -> str:
+    """Strip surrounding quotes from a string literal value."""
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    return value
+
+
+def collect_languages(tree: dict | list, languages: set[str]) -> None:
+    """
+    Recursively collect language identifiers from:
+    1. LANGTAG nodes on language-tagged literals (e.g., @en)
+    2. LANGMATCHES(LANG(?x), "en*") calls - second argument
+    3. LANG(?x) = "en" comparisons in RelationalExpression
+    """
+    if isinstance(tree, dict):
+        name = tree.get("name")
+        value = tree.get("value")
+
+        # 1. LANGTAG: @en -> en
+        if name == "LANGTAG" and value:
+            lang = value.lstrip("@").lower()
+            if lang:
+                languages.add(lang)
+
+        # 2. BuiltInCall with LANGMATCHES: extract second Expression child
+        if name == "BuiltInCall":
+            children = tree.get("children", [])
+            if children and isinstance(children[0], dict) and children[0].get("name") == "LANGMATCHES":
+                expressions = [c for c in children if isinstance(c, dict) and c.get("name") == "Expression"]
+                if len(expressions) >= 2:
+                    lang_str = _extract_string_from_subtree(expressions[1])
+                    if lang_str:
+                        lang = _strip_literal_quotes(lang_str).rstrip("*").lower()
+                        if lang:
+                            languages.add(lang)
+
+        # 3. RelationalExpression with ComparisonOp(=) and LANG on one side
+        if name == "RelationalExpression":
+            children = tree.get("children", [])
+            has_eq = any(
+                isinstance(c, dict) and c.get("name") == "ComparisonOp"
+                and any(isinstance(gc, dict) and gc.get("value") == "=" for gc in c.get("children", []))
+                for c in children
+            )
+            if has_eq:
+                num_exprs = [c for c in children if isinstance(c, dict) and c.get("name") == "NumericExpression"]
+                if len(num_exprs) == 2:
+                    if _has_lang_builtin(num_exprs[0]):
+                        lang_str = _extract_string_from_subtree(num_exprs[1])
+                    elif _has_lang_builtin(num_exprs[1]):
+                        lang_str = _extract_string_from_subtree(num_exprs[0])
+                    else:
+                        lang_str = None
+                    if lang_str:
+                        lang = _strip_literal_quotes(lang_str).lower()
+                        if lang:
+                            languages.add(lang)
+
+        for child in tree.get("children", []):
+            collect_languages(child, languages)
+    elif isinstance(tree, list):
+        for item in tree:
+            collect_languages(item, languages)
+
+
 def normalize_tree(
     tree: dict | list,
     normalize_properties: bool = False,
@@ -345,6 +465,14 @@ def main() -> None:
     unique_patterns_keep_props: set[str] = set()  # Normalize entities/literals, keep properties
     unique_patterns_norm_props: set[str] = set()  # Normalize everything including properties
 
+    # Track unique literals (global across all queries)
+    all_string_literals: set[str] = set()
+    all_numeric_literals: set[str] = set()
+
+    # Track languages: per-query sets, then aggregate into a Counter
+    language_counter: Counter[str] = Counter()  # How many queries use each language
+    queries_with_language: int = 0
+
     # Constructs we're interested in (terminals from sparql.l and rules from sparql.y)
     constructs_of_interest = [
         # Query types (terminals)
@@ -421,6 +549,17 @@ def main() -> None:
             # Extract PREFIX declarations and collect IRIs
             query_prefix_map = extract_prefix_declarations(tree)
             collect_iris(tree, iris_by_prefix, query_prefix_map)
+
+            # Collect literals
+            collect_literals(tree, all_string_literals, all_numeric_literals)
+
+            # Collect languages (per-query set, then update global counter)
+            query_languages: set[str] = set()
+            collect_languages(tree, query_languages)
+            if query_languages:
+                queries_with_language += 1
+                for lang in query_languages:
+                    language_counter[lang] += 1
 
             # Normalize and track unique patterns
             # Mode 1: Keep properties, normalize entities/variables/literals
@@ -530,6 +669,29 @@ def main() -> None:
         print(f"    Unique patterns: {n_keep:,} ({pct_keep:.1f}% of queries)")
         print(f"  Normalizing properties (normalize everything):")
         print(f"    Unique patterns: {n_norm:,} ({pct_norm:.1f}% of queries)")
+
+        # Literal statistics
+        print(f"\n{'-' * 60}")
+        print("Unique Literals:")
+        print(f"{'-' * 60}")
+        n_strings = len(all_string_literals)
+        n_numbers = len(all_numeric_literals)
+        n_total_literals = n_strings + n_numbers
+        print(f"  Total unique literals: {n_total_literals:,}")
+        print(f"    Strings: {n_strings:,}")
+        print(f"    Numbers: {n_numbers:,}")
+
+        # Language statistics
+        print(f"\n{'-' * 60}")
+        print("Language Usage:")
+        print(f"{'-' * 60}")
+        lang_pct = queries_with_language / successfully_parsed * 100
+        print(f"  Queries using language: {queries_with_language:,} ({lang_pct:.1f}%)")
+        if language_counter:
+            print(f"  Language distribution (by number of queries):")
+            for lang, count in language_counter.most_common():
+                pct = count / successfully_parsed * 100
+                print(f"    {lang}: {count:,} ({pct:.1f}%)")
 
 
 if __name__ == "__main__":
