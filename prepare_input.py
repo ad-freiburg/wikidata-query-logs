@@ -112,10 +112,12 @@ def main() -> None:
         f.close()
 
     num_unique = num_total - num_duplicate
-    print(f"\nResults:")
+    print("\nResults:")
     print(f"  - Total queries: {num_total:,}")
     print(f"  - Unique queries: {num_unique:,}")
-    print(f"  - Duplicates: {num_duplicate:,} ({num_duplicate / max(num_total, 1):.1%})")
+    print(
+        f"  - Duplicates: {num_duplicate:,} ({num_duplicate / max(num_total, 1):.1%})"
+    )
     print("\nDone!")
 
 

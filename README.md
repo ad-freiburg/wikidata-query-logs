@@ -7,10 +7,10 @@ from 2017 to 2018.
 # Overview
 
 The two most important files are:
-- [wdql-all.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-all.tar.gz): Full WDQL dataset for KGQA (train/val/test splits by cluster, all pairs per cluster retained)
-- [wdql-uniq.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-uniq.tar.gz): Deduplicated WDQL dataset for KGQA (train/val/test splits by cluster, one pair per cluster retained)
+- [wdql-all.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-all.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- [wdql-uniq.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-uniq.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 
-Each archive contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
+Both archives contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
 Each line in these files is a JSON object with the following structure:
 
 ```jsonc
@@ -23,7 +23,7 @@ Each line in these files is a JSON object with the following structure:
     "Show me the names of all Wikipedia language editions along with the corresponding Wikimedia language codes used to identify them."
   ],
   "info": {
-    // Original input SPARQL query from the Wikidata Query Logs
+    // Original SPARQL query from the Wikidata SPARQL Logs
     "raw_sparql": "SELECT ?var1 ?var2 WHERE { ?var1 <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q10876391> . OPTIONAL { ?var1 <http://www.wikidata.org/prop/direct/P424> ?var2 . } }"
   }
 }
@@ -33,25 +33,40 @@ Each line in these files is a JSON object with the following structure:
 > concatenate all JSONL files after downloading and extracting `wdql-all.tar.gz` or
 > `wdql-uniq.tar.gz` to get a single file with all question-SPARQL pairs.
 
-## Downloads
+## All Downloads
 
-Pre-generated files are available at https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs:
+All assets are available for download at https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs:
 
-- `organic.tar.gz`: Prepared SPARQL queries as JSONL
-- `organic-qwen3-next-80b-a3b.tar.gz`: Generated question-SPARQL pairs
-- `organic-qwen3-next-80b-a3b-dataset.tar.gz`: Raw dataset with embeddings and clusters
-- `wdql-all.tar.gz`: Full KGQA dataset (train/val/test splits)
-- `wdql-uniq.tar.gz`: Deduplicated KGQA dataset (train/val/test splits)
+- `organic-query-logs.tar.gz`: Raw Wikidata SPARQL query logs as TSV files
+- `organic.tar.gz`: Processed and deduplicated query logs in a single JSONL file
+- `organic-qwen3-next-80b-a3b.tar.gz`: Generated question-SPARQL samples with GRASP
+- `organic-qwen3-next-80b-a3b-dataset.tar.gz`: Processed GRASP samples with question embeddings and clusters
+- `wdql-uniq.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
+- `wdql-all.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
 - `wikidata-benchmarks.tar.gz`: Other Wikidata benchmarks (for comparison)
 
-Download and extract all of these files into a subdirectory named `data/` to skip
-some or all of the steps below.
+Download and extract these files into a subdirectory named `data/` to skip
+the corresponding steps in the pipeline below.
 
 ## Pipeline
+
+### Setup
+
+```bash
+# Create data directory and install dependencies
+mkdir -p data
+pip install -r requirements.txt
+```
+```
+```
 
 ### 1. Prepare input from query logs
 
 ```bash
+# Download and extract raw query logs
+curl -L https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/organic-query-logs.tar.gz \
+  | tar -xzv -C data/
+# Build organic.jsonl from TSV files
 python prepare_input.py data/*.tsv data/
 ```
 
@@ -61,24 +76,34 @@ python prepare_input.py data/*.tsv data/
 # Checkout wdql branch of GRASP
 git clone -b wikidata-query-logs --single-branch git@github.com:ad-freiburg/grasp.git
 
-# Install GRASP
+# Install and setup GRASP (see GRASP README for more details)
 cd grasp
 pip install -e .
+export GRASP_INDEX_DIR=$(pwd)/grasp-indices
+mkdir -p $GRASP_INDEX_DIR
 
-# Start vLLM server with Qwen-3-Next-80B-A3B
+# Download and extract GRASP Wikidata index
+curl -L https://ad-publications.cs.uni-freiburg.de/grasp/kg-index/wikidata.tar.gz \
+  | tar -xzv -C $GRASP_INDEX_DIR
+
+# Install vLLM and start server with Qwen-3-Next-80B-A3B
+pip install vllm
 vllm serve Qwen/Qwen3-Next-80B-A3B-Instruct \
   --tool-call-parser hermes \
   --enable-auto-tool-choice \
-  --port 8337
+  --port 8336
 
 # Start GRASP server with wdql config (runs on port 12345)
-grasp serve configs/wikidata-query-logs/qwen3-next-80b-a3b.yaml
+# By default, the config expects a Wikidata SPARQL endpoint at localhost:7001, but
+# here we set it to the public QLever endpoint instead
+KG_ENDPOINT=https://qlever.dev/api/wikidata \
+  grasp serve configs/wikidata-query-logs/qwen3-next-80b-a3b.yaml
 
 # Run generation script (more options available in the script)
 python scripts/run_wikidata_query_logs.py \
   data/organic.jsonl \
   data/organic-qwen3-next-80b-a3b/ \
-  http://localhost:12345/run
+  http://localhost:12345/run # GRASP server URL
 ```
 
 ### 3. Generate dataset and embeddings
@@ -96,9 +121,9 @@ python build_clusters.py
 ### 5. Export KGQA dataset using clusters
 
 ```bash
-# Deduplicated WDQL dataset (uniq)
+# WDQL uniq dataset (one sample per cluster)
 python export_kgqa_dataset.py
-# Full WDQL dataset (all)
+# WDQL all dataset (all samples per cluster)
 python export_kgqa_dataset.py --output-dir data/wdql-all \
   --samples-per-cluster -1
 ```
@@ -108,17 +133,30 @@ python export_kgqa_dataset.py --output-dir data/wdql-all \
 Generate some statistics about WDQL and other Wikidata datasets:
 
 ```bash
-for bench in data/(wdql-full|wdql|spinach|simplequestions|qald7|wwq|qawiki|lcquad2|qald10); \
+# Download and extract other Wikidata benchmarks
+curl -L https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wikidata-benchmarks.tar.gz \
+  | tar -xzv -C data/
+
+# Generate statistics
+for bench in data/(wdql-all|wdql-uniq|spinach|simplequestions|qald7|wwq|qawiki|lcquad2|qald10); \
   do cat $bench/*.jsonl | jq '.sparql' | python sparql_statistics.py \
   > $bench/statistics.txt; \
 done
 ```
 
+> Note: To generate statistics for `wdql-all` and `wdql-uniq`, you need to
+> complete step 5 above or download and extract the corresponding files first.
+
 ## Visualization
+
+Run a Streamlit app to visualize the dataset:
 
 ```bash
 streamlit run visualize_app.py
 ```
+
+> Note: To run the app, you need to complete step 4 above or download
+> and extract `organic-qwen3-next-80b-a3b-dataset.tar.gz` first.
 
 ## Declaration on AI
 
