@@ -362,6 +362,12 @@ def main() -> None:
     if formatted:
         sections = parse_formatted_sections(formatted)
 
+        # Raw SPARQL from the original query log
+        raw_sparql = sample.get("origin", {}).get("input", "")
+        if raw_sparql:
+            with st.expander("Raw SPARQL (from query log)"):
+                st.code(raw_sparql, language="sparql", wrap_lines=True)
+
         # Questions section
         if sections["questions"]:
             st.markdown(sections["questions"])
