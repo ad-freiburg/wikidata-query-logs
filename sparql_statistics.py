@@ -18,13 +18,15 @@ WIKIDATA_IRI_PREFIXES = [
     ("http://www.wikidata.org/prop/statement/", "ps:"),
     ("http://www.wikidata.org/prop/qualifier/", "pq:"),
     ("http://www.wikidata.org/prop/reference/", "pr:"),
-    ("http://www.wikidata.org/entity/statement/", "s:"),
+    ("http://www.wikidata.org/entity/statement/", "wds:"),
     ("http://www.wikidata.org/prop/novalue/", "wdno:"),
     ("http://www.wikidata.org/prop/direct/", "wdt:"),
-    ("http://www.wikidata.org/reference/", "ref:"),
+    ("http://www.wikidata.org/wiki/Special:EntityData/", "wdata:"),
+    ("http://www.wikidata.org/reference/", "wdref:"),
     ("http://www.wikidata.org/entity/", "wd:"),
-    ("http://www.wikidata.org/value/", "v:"),
+    ("http://www.wikidata.org/value/", "wdv:"),
     ("http://www.wikidata.org/prop/", "p:"),
+    ("http://wikiba.se/ontology#", "wikibase:"),
 ]
 
 # Default prefix map (standard Wikidata prefixes, as predefined by WDQS)
@@ -132,9 +134,23 @@ def collect_iris(
             collect_iris(item, iris_by_prefix, query_prefix_map)
 
 
-STRING_LITERAL_NODES = {"STRING_LITERAL1", "STRING_LITERAL2", "STRING_LITERAL_LONG1", "STRING_LITERAL_LONG2"}
-NUMERIC_LITERAL_NODES = {"INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "INTEGER_NEGATIVE",
-                         "DECIMAL_POSITIVE", "DECIMAL_NEGATIVE", "DOUBLE_POSITIVE", "DOUBLE_NEGATIVE"}
+STRING_LITERAL_NODES = {
+    "STRING_LITERAL1",
+    "STRING_LITERAL2",
+    "STRING_LITERAL_LONG1",
+    "STRING_LITERAL_LONG2",
+}
+NUMERIC_LITERAL_NODES = {
+    "INTEGER",
+    "DECIMAL",
+    "DOUBLE",
+    "INTEGER_POSITIVE",
+    "INTEGER_NEGATIVE",
+    "DECIMAL_POSITIVE",
+    "DECIMAL_NEGATIVE",
+    "DOUBLE_POSITIVE",
+    "DOUBLE_NEGATIVE",
+}
 
 
 def collect_literals(tree: dict | list, literals: set[str]) -> None:
@@ -152,8 +168,10 @@ def collect_literals(tree: dict | list, literals: set[str]) -> None:
             # Handle """ ''' " ' in that order
             normalized_value = value
             for quote in ['"""', "'''", '"', "'"]:
-                if normalized_value.startswith(quote) and normalized_value.endswith(quote):
-                    normalized_value = normalized_value[len(quote):-len(quote)]
+                if normalized_value.startswith(quote) and normalized_value.endswith(
+                    quote
+                ):
+                    normalized_value = normalized_value[len(quote) : -len(quote)]
                     break
             literals.add(normalized_value)
         elif name in NUMERIC_LITERAL_NODES and value:
@@ -187,7 +205,11 @@ def _has_lang_builtin(tree: dict | list) -> bool:
     if isinstance(tree, dict):
         if tree.get("name") == "BuiltInCall":
             children = tree.get("children", [])
-            if children and isinstance(children[0], dict) and children[0].get("name") == "LANG":
+            if (
+                children
+                and isinstance(children[0], dict)
+                and children[0].get("name") == "LANG"
+            ):
                 return True
         for child in tree.get("children", []):
             if _has_lang_builtin(child):
@@ -201,7 +223,9 @@ def _has_lang_builtin(tree: dict | list) -> bool:
 
 def _strip_literal_quotes(value: str) -> str:
     """Strip surrounding quotes from a string literal value."""
-    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
         return value[1:-1]
     return value
 
@@ -226,8 +250,16 @@ def collect_languages(tree: dict | list, languages: set[str]) -> None:
         # 2. BuiltInCall with LANGMATCHES: extract second Expression child
         if name == "BuiltInCall":
             children = tree.get("children", [])
-            if children and isinstance(children[0], dict) and children[0].get("name") == "LANGMATCHES":
-                expressions = [c for c in children if isinstance(c, dict) and c.get("name") == "Expression"]
+            if (
+                children
+                and isinstance(children[0], dict)
+                and children[0].get("name") == "LANGMATCHES"
+            ):
+                expressions = [
+                    c
+                    for c in children
+                    if isinstance(c, dict) and c.get("name") == "Expression"
+                ]
                 if len(expressions) >= 2:
                     lang_str = _extract_string_from_subtree(expressions[1])
                     if lang_str:
@@ -239,12 +271,20 @@ def collect_languages(tree: dict | list, languages: set[str]) -> None:
         if name == "RelationalExpression":
             children = tree.get("children", [])
             has_eq = any(
-                isinstance(c, dict) and c.get("name") == "ComparisonOp"
-                and any(isinstance(gc, dict) and gc.get("value") == "=" for gc in c.get("children", []))
+                isinstance(c, dict)
+                and c.get("name") == "ComparisonOp"
+                and any(
+                    isinstance(gc, dict) and gc.get("value") == "="
+                    for gc in c.get("children", [])
+                )
                 for c in children
             )
             if has_eq:
-                num_exprs = [c for c in children if isinstance(c, dict) and c.get("name") == "NumericExpression"]
+                num_exprs = [
+                    c
+                    for c in children
+                    if isinstance(c, dict) and c.get("name") == "NumericExpression"
+                ]
                 if len(num_exprs) == 2:
                     if _has_lang_builtin(num_exprs[0]):
                         lang_str = _extract_string_from_subtree(num_exprs[1])
@@ -295,7 +335,21 @@ def normalize_tree(
         literal_map = {}
 
     # Property prefixes (for normalization)
-    property_prefixes = {"wdt:", "p:", "ps:", "pq:", "pr:", "psv:", "pqv:", "prv:", "psn:", "pqn:", "prn:", "wdtn:", "wdno:"}
+    property_prefixes = {
+        "wdt:",
+        "p:",
+        "ps:",
+        "pq:",
+        "pr:",
+        "psv:",
+        "pqv:",
+        "prv:",
+        "psn:",
+        "pqn:",
+        "prn:",
+        "wdtn:",
+        "wdno:",
+    }
     # Entity prefixes
     entity_prefixes = {"wd:", "s:", "ref:", "v:"}
 
@@ -318,7 +372,7 @@ def normalize_tree(
             colon_idx = value.find(":")
             if colon_idx != -1:
                 prefix = value[: colon_idx + 1]
-                local = value[colon_idx + 1:]
+                local = value[colon_idx + 1 :]
 
                 if prefix in entity_prefixes:
                     # Entity IRI - same entity always gets same placeholder
@@ -347,7 +401,7 @@ def normalize_tree(
                 # Convert to prefixed form for normalization
                 for base, prefix in WIKIDATA_IRI_PREFIXES:
                     if iri.startswith(base):
-                        local = iri[len(base):]
+                        local = iri[len(base) :]
                         prefixed = f"{prefix}{local}"
 
                         if prefix in entity_prefixes:
@@ -359,7 +413,9 @@ def normalize_tree(
                             if normalize_properties:
                                 # Same property always gets same placeholder
                                 if prefixed not in property_map:
-                                    property_map[prefixed] = f"{prefix}P{len(property_map)}"
+                                    property_map[prefixed] = (
+                                        f"{prefix}P{len(property_map)}"
+                                    )
                                 new_node["value"] = f"<{property_map[prefixed]}>"
                             else:
                                 new_node["value"] = value
@@ -371,13 +427,27 @@ def normalize_tree(
             else:
                 # Non-Wikidata IRI - keep as-is
                 new_node["value"] = value
-        elif name in ("STRING_LITERAL1", "STRING_LITERAL2", "STRING_LITERAL_LONG1", "STRING_LITERAL_LONG2"):
+        elif name in (
+            "STRING_LITERAL1",
+            "STRING_LITERAL2",
+            "STRING_LITERAL_LONG1",
+            "STRING_LITERAL_LONG2",
+        ):
             # String literal - same value always gets same placeholder
             if value not in literal_map:
                 literal_map[value] = f'"lit{len(literal_map)}"'
             new_node["value"] = literal_map[value]
-        elif name in ("INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "INTEGER_NEGATIVE",
-                      "DECIMAL_POSITIVE", "DECIMAL_NEGATIVE", "DOUBLE_POSITIVE", "DOUBLE_NEGATIVE"):
+        elif name in (
+            "INTEGER",
+            "DECIMAL",
+            "DOUBLE",
+            "INTEGER_POSITIVE",
+            "INTEGER_NEGATIVE",
+            "DECIMAL_POSITIVE",
+            "DECIMAL_NEGATIVE",
+            "DOUBLE_POSITIVE",
+            "DOUBLE_NEGATIVE",
+        ):
             # Numeric literal - same value always gets same placeholder
             if value not in literal_map:
                 literal_map[value] = f'"lit{len(literal_map)}"'
@@ -405,14 +475,28 @@ def normalize_tree(
                 filtered_children.append(child)
 
             new_node["children"] = [
-                normalize_tree(child, normalize_properties, var_map, entity_map, property_map, literal_map)
+                normalize_tree(
+                    child,
+                    normalize_properties,
+                    var_map,
+                    entity_map,
+                    property_map,
+                    literal_map,
+                )
                 for child in filtered_children
             ]
 
         return new_node
     elif isinstance(tree, list):
         return [
-            normalize_tree(item, normalize_properties, var_map, entity_map, property_map, literal_map)
+            normalize_tree(
+                item,
+                normalize_properties,
+                var_map,
+                entity_map,
+                property_map,
+                literal_map,
+            )
             for item in tree
         ]
     else:
@@ -495,7 +579,16 @@ def main() -> None:
     triple_pattern_counts: list[int] = []
 
     # Track queries using advanced SPARQL constructs
-    advanced_constructs = {"UNION", "MINUS", "OPTIONAL", "GROUP", "|", "/", "PathMod", "SubSelect"}
+    advanced_constructs = {
+        "UNION",
+        "MINUS",
+        "OPTIONAL",
+        "GROUP",
+        "|",
+        "/",
+        "PathMod",
+        "SubSelect",
+    }
     queries_with_advanced = 0
 
     # Track queries using any property path feature
@@ -509,8 +602,12 @@ def main() -> None:
     iris_by_prefix["other:"] = set()
 
     # Track unique normalized query patterns
-    unique_patterns_keep_props: set[str] = set()  # Normalize entities/literals, keep properties
-    unique_patterns_norm_props: set[str] = set()  # Normalize everything including properties
+    unique_patterns_keep_props: set[str] = (
+        set()
+    )  # Normalize entities/literals, keep properties
+    unique_patterns_norm_props: set[str] = (
+        set()
+    )  # Normalize everything including properties
 
     # Track unique literals (global across all queries)
     all_literals: set[str] = set()
@@ -635,7 +732,9 @@ def main() -> None:
 
     if successfully_parsed > 0:
         adv_pct = queries_with_advanced / successfully_parsed * 100
-        print(f"Queries with advanced constructs: {queries_with_advanced} ({adv_pct:.1f}%)")
+        print(
+            f"Queries with advanced constructs: {queries_with_advanced} ({adv_pct:.1f}%)"
+        )
         path_pct = queries_with_paths / successfully_parsed * 100
         print(f"Queries with property paths: {queries_with_paths} ({path_pct:.1f}%)")
         # Triple pattern statistics

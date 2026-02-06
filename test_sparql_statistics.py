@@ -317,29 +317,40 @@ class TestGetWikidataPrefix:
 
     def test_prop_statement_iri(self):
         """prop/statement IRI should return ps: prefix."""
-        assert get_wikidata_prefix("http://www.wikidata.org/prop/statement/P31") == "ps:"
+        assert (
+            get_wikidata_prefix("http://www.wikidata.org/prop/statement/P31") == "ps:"
+        )
 
     def test_prop_statement_normalized_iri(self):
         """prop/statement/value-normalized should return psn: (not ps:)."""
         assert (
-            get_wikidata_prefix("http://www.wikidata.org/prop/statement/value-normalized/P31")
+            get_wikidata_prefix(
+                "http://www.wikidata.org/prop/statement/value-normalized/P31"
+            )
             == "psn:"
         )
 
     def test_prop_qualifier_iri(self):
         """prop/qualifier IRI should return pq: prefix."""
-        assert get_wikidata_prefix("http://www.wikidata.org/prop/qualifier/P585") == "pq:"
+        assert (
+            get_wikidata_prefix("http://www.wikidata.org/prop/qualifier/P585") == "pq:"
+        )
 
     def test_prop_qualifier_normalized_iri(self):
         """prop/qualifier/value-normalized should return pqn: (not pq:)."""
         assert (
-            get_wikidata_prefix("http://www.wikidata.org/prop/qualifier/value-normalized/P585")
+            get_wikidata_prefix(
+                "http://www.wikidata.org/prop/qualifier/value-normalized/P585"
+            )
             == "pqn:"
         )
 
     def test_statement_iri(self):
         """entity/statement IRI should return s: prefix (not wd:)."""
-        assert get_wikidata_prefix("http://www.wikidata.org/entity/statement/Q42-abc123") == "s:"
+        assert (
+            get_wikidata_prefix("http://www.wikidata.org/entity/statement/Q42-abc123")
+            == "wds:"
+        )
 
     def test_non_wikidata_iri(self):
         """Non-Wikidata IRIs should return None."""
@@ -406,7 +417,10 @@ class TestCollectIris:
             "SELECT ?x WHERE { ?s ps:P31 ?x . ?s psn:P569 ?y }", parser
         )
         assert "http://www.wikidata.org/prop/statement/P31" in iris["ps:"]
-        assert "http://www.wikidata.org/prop/statement/value-normalized/P569" in iris["psn:"]
+        assert (
+            "http://www.wikidata.org/prop/statement/value-normalized/P569"
+            in iris["psn:"]
+        )
         assert len(iris["ps:"]) == 1
         assert len(iris["psn:"]) == 1
 
@@ -417,7 +431,7 @@ class TestCollectIris:
             "SELECT ?x WHERE { ?s s:Q42-abc123 ?x }",
             parser,
         )
-        assert "http://www.wikidata.org/entity/statement/Q42-abc123" in iris["s:"]
+        assert "http://www.wikidata.org/entity/statement/Q42-abc123" in iris["wds:"]
         assert len(iris["wd:"]) == 0
 
 
@@ -537,21 +551,25 @@ def normalize_query(query: str, parser, normalize_properties: bool = False) -> s
     return tree_to_sparql(normalized)
 
 
-def assert_queries_normalize_same(queries: list[str], parser, normalize_properties: bool = False) -> None:
+def assert_queries_normalize_same(
+    queries: list[str], parser, normalize_properties: bool = False
+) -> None:
     """Assert that all queries in the list normalize to the same SPARQL form."""
     normalized = [normalize_query(q, parser, normalize_properties) for q in queries]
     first = normalized[0]
     for i, norm in enumerate(normalized[1:], 1):
         assert norm == first, (
-            f"Query {i+1} normalized differently than Query 1:\n"
+            f"Query {i + 1} normalized differently than Query 1:\n"
             f"Query 1: {queries[0]}\n"
-            f"Query {i+1}: {queries[i]}\n"
+            f"Query {i + 1}: {queries[i]}\n"
             f"Normalized 1: {first}\n"
-            f"Normalized {i+1}: {norm}"
+            f"Normalized {i + 1}: {norm}"
         )
 
 
-def assert_queries_normalize_different(query1: str, query2: str, parser, normalize_properties: bool = False) -> None:
+def assert_queries_normalize_different(
+    query1: str, query2: str, parser, normalize_properties: bool = False
+) -> None:
     """Assert that two queries normalize to different SPARQL forms."""
     norm1 = normalize_query(query1, parser, normalize_properties)
     norm2 = normalize_query(query2, parser, normalize_properties)
@@ -563,7 +581,12 @@ def assert_queries_normalize_different(query1: str, query2: str, parser, normali
     )
 
 
-def assert_normalizes_to(input_query: str, expected_normalized_sparql: str, parser, normalize_properties: bool = False) -> None:
+def assert_normalizes_to(
+    input_query: str,
+    expected_normalized_sparql: str,
+    parser,
+    normalize_properties: bool = False,
+) -> None:
     """Assert that input query normalizes to the expected SPARQL form."""
     tree = parse_sparql(input_query, parser)
     normalized = normalize_tree(tree, normalize_properties=normalize_properties)
@@ -583,7 +606,7 @@ class TestNormalizeTreeVariables:
         assert_normalizes_to(
             "SELECT ?x WHERE { ?x ?p ?o }",
             "SELECT ?var0 WHERE { ?var0 ?var1 ?var2 }",
-            parser
+            parser,
         )
 
     def test_multiple_variables_get_different_placeholders(self, parser):
@@ -591,7 +614,7 @@ class TestNormalizeTreeVariables:
         assert_normalizes_to(
             "SELECT ?x ?y WHERE { ?x ?p ?y }",
             "SELECT ?var0 ?var1 WHERE { ?var0 ?var2 ?var1 }",
-            parser
+            parser,
         )
 
     def test_same_variable_same_placeholder(self, parser):
@@ -599,7 +622,7 @@ class TestNormalizeTreeVariables:
         assert_normalizes_to(
             "SELECT ?x WHERE { ?x <http://a> ?y . ?x <http://b> ?z }",
             "SELECT ?var0 WHERE { ?var0 <http://a> ?var1 . ?var0 <http://b> ?var2 }",
-            parser
+            parser,
         )
 
 
@@ -609,7 +632,7 @@ class TestNormalizeTreeEntities:
         assert_normalizes_to(
             "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
             "SELECT ?var0 WHERE { wd:E0 wdt:P31 ?var0 }",
-            parser
+            parser,
         )
 
     def test_same_entity_same_placeholder(self, parser):
@@ -617,7 +640,7 @@ class TestNormalizeTreeEntities:
         assert_normalizes_to(
             "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x . wd:Q42 wdt:P27 ?y }",
             "SELECT ?var0 WHERE { wd:E0 wdt:P31 ?var0 . wd:E0 wdt:P27 ?var1 }",
-            parser
+            parser,
         )
 
     def test_different_entities_different_placeholders(self, parser):
@@ -625,7 +648,7 @@ class TestNormalizeTreeEntities:
         assert_normalizes_to(
             "SELECT ?x WHERE { wd:Q42 wdt:P31 wd:Q5 }",
             "SELECT ?var0 WHERE { wd:E0 wdt:P31 wd:E1 }",
-            parser
+            parser,
         )
 
     def test_statement_entity_normalized(self, parser):
@@ -634,24 +657,30 @@ class TestNormalizeTreeEntities:
             "PREFIX s: <http://www.wikidata.org/entity/statement/> "
             "SELECT ?x WHERE { ?s s:Q42-abc123 ?x }",
             "SELECT ?var0 WHERE { ?var1 s:E0 ?var0 }",
-            parser
+            parser,
         )
 
 
 class TestNormalizeTreeLiterals:
     def test_string_literal_normalized(self, parser):
         """Different string VALUES should normalize to same pattern (same structure)."""
-        assert_queries_normalize_same([
-            'SELECT ?x WHERE { ?x <http://a> "Albert Einstein" }',
-            'SELECT ?x WHERE { ?x <http://a> "Marie Curie" }',
-        ], parser)
+        assert_queries_normalize_same(
+            [
+                'SELECT ?x WHERE { ?x <http://a> "Albert Einstein" }',
+                'SELECT ?x WHERE { ?x <http://a> "Marie Curie" }',
+            ],
+            parser,
+        )
 
     def test_integer_literal_normalized(self, parser):
         """Different numeric VALUES should normalize to same pattern (same structure)."""
-        assert_queries_normalize_same([
-            "SELECT ?x WHERE { ?x <http://a> 42 }",
-            "SELECT ?x WHERE { ?x <http://a> 100 }",
-        ], parser)
+        assert_queries_normalize_same(
+            [
+                "SELECT ?x WHERE { ?x <http://a> 42 }",
+                "SELECT ?x WHERE { ?x <http://a> 100 }",
+            ],
+            parser,
+        )
 
     def test_same_string_literal_same_placeholder(self, parser):
         """Same string literal appearing twice in same query uses same placeholder."""
@@ -685,30 +714,39 @@ class TestNormalizeTreeLiterals:
         assert_normalizes_to(
             'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> 42 . ?x <http://c> "world" }',
             'SELECT ?var0 WHERE { ?var0 <http://a> "lit0" . ?var0 <http://b> "lit1" . ?var0 <http://c> "lit2" }',
-            parser
+            parser,
         )
 
     def test_string_literal_with_and_without_datatype(self, parser):
         """String literal with/without datatype should normalize the same."""
-        assert_queries_normalize_same([
-            'SELECT ?x WHERE { ?x <http://a> "hello" }',
-            'SELECT ?x WHERE { ?x <http://a> "hello"^^<http://www.w3.org/2001/XMLSchema#string> }',
-        ], parser)
+        assert_queries_normalize_same(
+            [
+                'SELECT ?x WHERE { ?x <http://a> "hello" }',
+                'SELECT ?x WHERE { ?x <http://a> "hello"^^<http://www.w3.org/2001/XMLSchema#string> }',
+            ],
+            parser,
+        )
 
     def test_numeric_literal_with_and_without_datatype(self, parser):
         """Numeric literal with/without datatype should normalize the same."""
-        assert_queries_normalize_same([
-            'SELECT ?x WHERE { ?x <http://a> "123" }',
-            'SELECT ?x WHERE { ?x <http://a> "123"^^<http://www.w3.org/2001/XMLSchema#integer> }',
-            'SELECT ?x WHERE { ?x <http://a> "123"^^<http://www.w3.org/2001/XMLSchema#decimal> }',
-        ], parser)
+        assert_queries_normalize_same(
+            [
+                'SELECT ?x WHERE { ?x <http://a> "123" }',
+                'SELECT ?x WHERE { ?x <http://a> "123"^^<http://www.w3.org/2001/XMLSchema#integer> }',
+                'SELECT ?x WHERE { ?x <http://a> "123"^^<http://www.w3.org/2001/XMLSchema#decimal> }',
+            ],
+            parser,
+        )
 
     def test_raw_number_and_typed_string_normalize_same(self, parser):
         """Raw numeric literal and string with numeric datatype should normalize the same."""
-        assert_queries_normalize_same([
-            'SELECT ?x WHERE { ?x <http://a> 400 }',
-            'SELECT ?x WHERE { ?x <http://a> "400"^^<http://www.w3.org/2001/XMLSchema#integer> }',
-        ], parser)
+        assert_queries_normalize_same(
+            [
+                "SELECT ?x WHERE { ?x <http://a> 400 }",
+                'SELECT ?x WHERE { ?x <http://a> "400"^^<http://www.w3.org/2001/XMLSchema#integer> }',
+            ],
+            parser,
+        )
 
 
 class TestNormalizeTreeProperties:
@@ -718,7 +756,7 @@ class TestNormalizeTreeProperties:
             "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
             "SELECT ?var0 WHERE { wd:E0 wdt:P31 ?var0 }",
             parser,
-            normalize_properties=False
+            normalize_properties=False,
         )
 
     def test_properties_normalized_when_enabled(self, parser):
@@ -727,7 +765,7 @@ class TestNormalizeTreeProperties:
             "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
             "SELECT ?var0 WHERE { wd:E0 wdt:P0 ?var0 }",
             parser,
-            normalize_properties=True
+            normalize_properties=True,
         )
 
     def test_same_property_same_placeholder(self, parser):
@@ -736,7 +774,7 @@ class TestNormalizeTreeProperties:
             "SELECT ?x ?y WHERE { wd:Q42 wdt:P31 ?x . wd:Q5 wdt:P31 ?y }",
             "SELECT ?var0 ?var1 WHERE { wd:E0 wdt:P0 ?var0 . wd:E1 wdt:P0 ?var1 }",
             parser,
-            normalize_properties=True
+            normalize_properties=True,
         )
 
     def test_different_properties_different_placeholders(self, parser):
@@ -745,7 +783,7 @@ class TestNormalizeTreeProperties:
             "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x . wd:Q42 wdt:P27 ?y }",
             "SELECT ?var0 WHERE { wd:E0 wdt:P0 ?var0 . wd:E0 wdt:P1 ?var1 }",
             parser,
-            normalize_properties=True
+            normalize_properties=True,
         )
 
     def test_different_property_prefixes_shared_counter(self, parser):
@@ -754,7 +792,7 @@ class TestNormalizeTreeProperties:
             "SELECT ?x WHERE { ?s p:P31 ?stmt . ?stmt ps:P31 ?x }",
             "SELECT ?var0 WHERE { ?var1 p:P0 ?var2 . ?var2 ps:P1 ?var0 }",
             parser,
-            normalize_properties=True
+            normalize_properties=True,
         )
 
 
@@ -796,7 +834,9 @@ class TestQueryPatternDeduplication:
         )
         assert canonical1 != canonical2
 
-    def test_same_structure_different_properties_same_pattern_when_normalized(self, parser):
+    def test_same_structure_different_properties_same_pattern_when_normalized(
+        self, parser
+    ):
         """Queries with different properties should have same pattern when normalizing properties."""
         canonical1 = normalize_query(
             "SELECT ?x WHERE { wd:Q42 wdt:P31 ?x }",
@@ -828,7 +868,9 @@ class TestQueryPatternDeduplication:
     def test_entity_values_dont_affect_pattern(self, parser):
         """Different entity values should not affect the pattern."""
         canonical1 = normalize_query("SELECT ?x WHERE { wd:Q42 wdt:P31 wd:Q5 }", parser)
-        canonical2 = normalize_query("SELECT ?x WHERE { wd:Q100 wdt:P31 wd:Q200 }", parser)
+        canonical2 = normalize_query(
+            "SELECT ?x WHERE { wd:Q100 wdt:P31 wd:Q200 }", parser
+        )
         assert canonical1 == canonical2
 
 
@@ -851,23 +893,17 @@ def get_languages(query: str, parser) -> set[str]:
 class TestCollectLiterals:
     def test_string_literal(self, parser):
         """String literals should have quotes stripped."""
-        literals = get_literals(
-            'SELECT ?x WHERE { ?x <http://a> "hello" }', parser
-        )
-        assert 'hello' in literals
+        literals = get_literals('SELECT ?x WHERE { ?x <http://a> "hello" }', parser)
+        assert "hello" in literals
         assert len(literals) == 1
 
     def test_integer_literal(self, parser):
-        literals = get_literals(
-            "SELECT ?x WHERE { ?x <http://a> 42 }", parser
-        )
+        literals = get_literals("SELECT ?x WHERE { ?x <http://a> 42 }", parser)
         assert "42" in literals
         assert len(literals) == 1
 
     def test_decimal_literal(self, parser):
-        literals = get_literals(
-            "SELECT ?x WHERE { ?x <http://a> 3.14 }", parser
-        )
+        literals = get_literals("SELECT ?x WHERE { ?x <http://a> 3.14 }", parser)
         assert "3.14" in literals
 
     def test_multiple_literals_deduplicated(self, parser):
@@ -884,16 +920,14 @@ class TestCollectLiterals:
         )
         # 2 strings + 1 number = 3 total
         assert len(literals) == 3
-        assert 'hello' in literals
-        assert 'world' in literals
-        assert '42' in literals
+        assert "hello" in literals
+        assert "world" in literals
+        assert "42" in literals
 
     def test_language_tagged_string_collected(self, parser):
         """The string part of a lang-tagged literal should be collected without quotes."""
-        literals = get_literals(
-            'SELECT ?x WHERE { ?x <http://a> "hello"@en }', parser
-        )
-        assert 'hello' in literals
+        literals = get_literals('SELECT ?x WHERE { ?x <http://a> "hello"@en }', parser)
+        assert "hello" in literals
 
     def test_typed_literal_string_collected(self, parser):
         """The string part of a typed literal (e.g. xsd:date) should be collected without quotes."""
@@ -901,7 +935,7 @@ class TestCollectLiterals:
             'SELECT ?x WHERE { ?x <http://a> "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#date> }',
             parser,
         )
-        assert '2024-01-01' in literals
+        assert "2024-01-01" in literals
 
     def test_numeric_and_string_same_value_deduplicated(self, parser):
         """400, "400", and "400"^^xsd:integer should all be counted as one literal."""
@@ -910,12 +944,10 @@ class TestCollectLiterals:
             parser,
         )
         assert len(literals) == 1
-        assert '400' in literals
+        assert "400" in literals
 
     def test_no_literals(self, parser):
-        literals = get_literals(
-            "SELECT ?x WHERE { ?x <http://a> ?y }", parser
-        )
+        literals = get_literals("SELECT ?x WHERE { ?x <http://a> ?y }", parser)
         assert len(literals) == 0
 
 
@@ -962,10 +994,10 @@ class TestCollectLanguages:
     def test_multiple_languages(self, parser):
         """Multiple language sources in same query."""
         langs = get_languages(
-            'SELECT ?x ?y WHERE { '
+            "SELECT ?x ?y WHERE { "
             '?x <http://a> "hello"@en . '
             '?x <http://b> ?label . FILTER(LANG(?label) = "de") '
-            '}',
+            "}",
             parser,
         )
         assert "en" in langs
@@ -973,9 +1005,7 @@ class TestCollectLanguages:
 
     def test_no_language(self, parser):
         """Query without any language constructs."""
-        langs = get_languages(
-            "SELECT ?x WHERE { ?x <http://a> ?y }", parser
-        )
+        langs = get_languages("SELECT ?x WHERE { ?x <http://a> ?y }", parser)
         assert len(langs) == 0
 
 
@@ -1003,15 +1033,14 @@ class TestNormalizeLanguageTags:
         """Multiple language tags should all be removed."""
         canonical1 = normalize_query(
             'SELECT ?x WHERE { ?x <http://a> "hello"@en . ?x <http://b> "world"@fr }',
-            parser
+            parser,
         )
         canonical2 = normalize_query(
             'SELECT ?x WHERE { ?x <http://a> "hello"@de . ?x <http://b> "world"@es }',
-            parser
+            parser,
         )
         canonical3 = normalize_query(
-            'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> "world" }',
-            parser
+            'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> "world" }', parser
         )
         assert canonical1 == canonical2 == canonical3, (
             f"Multiple language tags not properly normalized:\n"
@@ -1048,15 +1077,14 @@ class TestNormalizeDatatypes:
         """Datatypes should be removed during normalization."""
         canonical1 = normalize_query(
             'SELECT ?x WHERE { ?x <http://a> "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#date> }',
-            parser
+            parser,
         )
         canonical2 = normalize_query(
             'SELECT ?x WHERE { ?x <http://a> "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#string> }',
-            parser
+            parser,
         )
         canonical3 = normalize_query(
-            'SELECT ?x WHERE { ?x <http://a> "2024-01-01" }',
-            parser
+            'SELECT ?x WHERE { ?x <http://a> "2024-01-01" }', parser
         )
         assert canonical1 == canonical2 == canonical3, (
             f"Datatypes not properly normalized:\n"
@@ -1069,16 +1097,13 @@ class TestNormalizeDatatypes:
         """Numeric datatypes should be removed."""
         canonical1 = normalize_query(
             'SELECT ?x WHERE { ?x <http://a> "123"^^<http://www.w3.org/2001/XMLSchema#integer> }',
-            parser
+            parser,
         )
         canonical2 = normalize_query(
             'SELECT ?x WHERE { ?x <http://a> "123"^^<http://www.w3.org/2001/XMLSchema#decimal> }',
-            parser
+            parser,
         )
-        canonical3 = normalize_query(
-            'SELECT ?x WHERE { ?x <http://a> "123" }',
-            parser
-        )
+        canonical3 = normalize_query('SELECT ?x WHERE { ?x <http://a> "123" }', parser)
         assert canonical1 == canonical2 == canonical3, (
             f"Numeric datatypes not properly normalized:\n"
             f"integer: {canonical1}\n"
@@ -1089,22 +1114,21 @@ class TestNormalizeDatatypes:
     def test_multiple_datatypes_removed(self, parser):
         """Multiple datatypes in same query should all be removed."""
         canonical1 = normalize_query(
-            'SELECT ?x WHERE { '
+            "SELECT ?x WHERE { "
             '?x <http://a> "2024"^^<http://www.w3.org/2001/XMLSchema#gYear> . '
             '?x <http://b> "42"^^<http://www.w3.org/2001/XMLSchema#integer> '
-            '}',
-            parser
+            "}",
+            parser,
         )
         canonical2 = normalize_query(
-            'SELECT ?x WHERE { '
+            "SELECT ?x WHERE { "
             '?x <http://a> "2024"^^<http://www.w3.org/2001/XMLSchema#string> . '
             '?x <http://b> "42"^^<http://www.w3.org/2001/XMLSchema#decimal> '
-            '}',
-            parser
+            "}",
+            parser,
         )
         canonical3 = normalize_query(
-            'SELECT ?x WHERE { ?x <http://a> "2024" . ?x <http://b> "42" }',
-            parser
+            'SELECT ?x WHERE { ?x <http://a> "2024" . ?x <http://b> "42" }', parser
         )
         assert canonical1 == canonical2 == canonical3, (
             f"Multiple datatypes not properly normalized:\n"
@@ -1118,22 +1142,21 @@ class TestNormalizeLanguageAndDatatype:
     def test_language_and_datatype_both_removed(self, parser):
         """Queries with both language tags and datatypes should normalize the same."""
         canonical1 = normalize_query(
-            'SELECT ?x WHERE { '
+            "SELECT ?x WHERE { "
             '?x <http://a> "hello"@en . '
             '?x <http://b> "2024"^^<http://www.w3.org/2001/XMLSchema#gYear> '
-            '}',
-            parser
+            "}",
+            parser,
         )
         canonical2 = normalize_query(
-            'SELECT ?x WHERE { '
+            "SELECT ?x WHERE { "
             '?x <http://a> "hello"@de . '
             '?x <http://b> "2024"^^<http://www.w3.org/2001/XMLSchema#string> '
-            '}',
-            parser
+            "}",
+            parser,
         )
         canonical3 = normalize_query(
-            'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> "2024" }',
-            parser
+            'SELECT ?x WHERE { ?x <http://a> "hello" . ?x <http://b> "2024" }', parser
         )
         assert canonical1 == canonical2 == canonical3, (
             f"Language and datatypes not properly normalized:\n"
@@ -1147,18 +1170,18 @@ class TestNormalizeWikidataQueries:
     def test_wikidata_query_with_language(self, parser):
         """Real Wikidata query with language tags should normalize properly."""
         canonical1 = normalize_query(
-            'SELECT ?itemLabel WHERE { '
-            'wd:Q42 rdfs:label ?itemLabel . '
+            "SELECT ?itemLabel WHERE { "
+            "wd:Q42 rdfs:label ?itemLabel . "
             'FILTER(LANG(?itemLabel) = "en") '
-            '}',
-            parser
+            "}",
+            parser,
         )
         canonical2 = normalize_query(
-            'SELECT ?itemLabel WHERE { '
-            'wd:Q5 rdfs:label ?itemLabel . '
+            "SELECT ?itemLabel WHERE { "
+            "wd:Q5 rdfs:label ?itemLabel . "
             'FILTER(LANG(?itemLabel) = "de") '
-            '}',
-            parser
+            "}",
+            parser,
         )
         # These should be the same pattern (different entity, different language string)
         assert canonical1 == canonical2, (
@@ -1170,18 +1193,15 @@ class TestNormalizeWikidataQueries:
     def test_wikidata_query_with_language_tag_on_literal(self, parser):
         """Wikidata query with language-tagged literals should normalize."""
         canonical1 = normalize_query(
-            'SELECT ?x WHERE { '
+            "SELECT ?x WHERE { "
             'wd:Q42 rdfs:label "Albert Einstein"@en . '
-            'wd:Q42 wdt:P31 ?x '
-            '}',
-            parser
+            "wd:Q42 wdt:P31 ?x "
+            "}",
+            parser,
         )
         canonical2 = normalize_query(
-            'SELECT ?x WHERE { '
-            'wd:Q5 rdfs:label "Mensch"@de . '
-            'wd:Q5 wdt:P31 ?x '
-            '}',
-            parser
+            'SELECT ?x WHERE { wd:Q5 rdfs:label "Mensch"@de . wd:Q5 wdt:P31 ?x }',
+            parser,
         )
         # Same structure, different entities and language tags
         assert canonical1 == canonical2, (
