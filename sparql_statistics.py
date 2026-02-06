@@ -137,20 +137,20 @@ NUMERIC_LITERAL_NODES = {"INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "IN
                          "DECIMAL_POSITIVE", "DECIMAL_NEGATIVE", "DOUBLE_POSITIVE", "DOUBLE_NEGATIVE"}
 
 
-def collect_literals(tree: dict | list, string_literals: set[str], numeric_literals: set[str]) -> None:
-    """Recursively collect unique string and numeric literals from the parse tree."""
+def collect_literals(tree: dict | list, literals: set[str]) -> None:
+    """Recursively collect unique literals (both string and numeric) from the parse tree."""
     if isinstance(tree, dict):
         name = tree.get("name")
         value = tree.get("value")
         if name in STRING_LITERAL_NODES and value:
-            string_literals.add(value)
+            literals.add(value)
         elif name in NUMERIC_LITERAL_NODES and value:
-            numeric_literals.add(value)
+            literals.add(value)
         for child in tree.get("children", []):
-            collect_literals(child, string_literals, numeric_literals)
+            collect_literals(child, literals)
     elif isinstance(tree, list):
         for item in tree:
-            collect_literals(item, string_literals, numeric_literals)
+            collect_literals(item, literals)
 
 
 def _extract_string_from_subtree(tree: dict | list) -> str | None:
@@ -258,14 +258,15 @@ def normalize_tree(
     var_map: dict[str, str] | None = None,
     entity_map: dict[str, str] | None = None,
     property_map: dict[str, str] | None = None,
-    literal_counter: list[int] | None = None,
+    literal_map: dict[str, str] | None = None,
 ) -> dict | list:
     """
     Normalize a SPARQL parse tree by replacing:
     - Variables with ?var0, ?var1, ... (preserving binding structure)
     - Entity IRIs (wd:Qxxx) with wd:E0, wd:E1, ...
-    - Literals with "lit0", "lit1", ...
+    - Literals (both string and numeric) with "lit0", "lit1", ... (same value gets same placeholder)
     - Optionally property IRIs with wdt:P0, p:P0, etc.
+    - Language tags and datatypes are removed entirely
 
     The same original value always maps to the same placeholder within a query,
     preserving the structure (e.g., if ?x appears twice, both become ?var0).
@@ -278,8 +279,8 @@ def normalize_tree(
         entity_map = {}
     if property_map is None:
         property_map = {}
-    if literal_counter is None:
-        literal_counter = [0]  # Use list to allow mutation in nested calls
+    if literal_map is None:
+        literal_map = {}
 
     # Property prefixes (for normalization)
     property_prefixes = {"wdt:", "p:", "ps:", "pq:", "pr:", "psv:", "pqv:", "prv:", "psn:", "pqn:", "prn:", "wdtn:", "wdno:"}
@@ -290,6 +291,10 @@ def normalize_tree(
         name = tree.get("name")
         value = tree.get("value")
         new_node: dict = {"name": name}
+
+        # Skip PREFIX declarations entirely - they don't affect structural equivalence
+        if name == "PrefixDecl":
+            return new_node
 
         if name == "VAR1" or name == "VAR2":
             # Variable like ?x or $x - same variable always gets same placeholder
@@ -355,54 +360,84 @@ def normalize_tree(
                 # Non-Wikidata IRI - keep as-is
                 new_node["value"] = value
         elif name in ("STRING_LITERAL1", "STRING_LITERAL2", "STRING_LITERAL_LONG1", "STRING_LITERAL_LONG2"):
-            # String literal - each gets unique placeholder (literals typically don't repeat with same meaning)
-            new_node["value"] = f'"lit{literal_counter[0]}"'
-            literal_counter[0] += 1
+            # String literal - same value always gets same placeholder
+            if value not in literal_map:
+                literal_map[value] = f'"lit{len(literal_map)}"'
+            new_node["value"] = literal_map[value]
         elif name in ("INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "INTEGER_NEGATIVE",
                       "DECIMAL_POSITIVE", "DECIMAL_NEGATIVE", "DOUBLE_POSITIVE", "DOUBLE_NEGATIVE"):
-            # Numeric literal
-            new_node["value"] = "0"
+            # Numeric literal - same value always gets same placeholder
+            if value not in literal_map:
+                literal_map[value] = f'"lit{len(literal_map)}"'
+            new_node["value"] = literal_map[value]
         elif value is not None:
             new_node["value"] = value
 
         if "children" in tree:
+            # Filter out LANGTAG and datatype nodes (IRIREF following ^^)
+            filtered_children = []
+            skip_next = False
+            for i, child in enumerate(tree["children"]):
+                if skip_next:
+                    skip_next = False
+                    continue
+                # Skip LANGTAG nodes entirely
+                if isinstance(child, dict) and child.get("name") == "LANGTAG":
+                    continue
+                # Skip ^^ operator and following IRIREF (datatype annotation)
+                if isinstance(child, dict) and child.get("value") == "^^":
+                    # Skip this and the next child (the datatype IRI)
+                    if i + 1 < len(tree["children"]):
+                        skip_next = True
+                    continue
+                filtered_children.append(child)
+
             new_node["children"] = [
-                normalize_tree(child, normalize_properties, var_map, entity_map, property_map, literal_counter)
-                for child in tree["children"]
+                normalize_tree(child, normalize_properties, var_map, entity_map, property_map, literal_map)
+                for child in filtered_children
             ]
 
         return new_node
     elif isinstance(tree, list):
         return [
-            normalize_tree(item, normalize_properties, var_map, entity_map, property_map, literal_counter)
+            normalize_tree(item, normalize_properties, var_map, entity_map, property_map, literal_map)
             for item in tree
         ]
     else:
         return tree
 
 
-def tree_to_canonical_string(tree: dict | list) -> str:
+def tree_to_sparql(tree: dict | list) -> str:
     """
-    Convert a parse tree to a canonical string representation for deduplication.
-    This creates a deterministic string from the tree structure.
+    Convert a parse tree to SPARQL by extracting all terminal values.
+    This provides a human-readable representation of the (normalized) query.
+    Skips PREFIX declarations as they don't affect structural equivalence.
     """
-    if isinstance(tree, dict):
-        name = tree.get("name", "")
-        value = tree.get("value", "")
-        children = tree.get("children", [])
+    terminals = []
 
-        if children:
-            children_str = ",".join(tree_to_canonical_string(c) for c in children)
-            if value:
-                return f"{name}[{value}]({children_str})"
-            return f"{name}({children_str})"
-        elif value:
-            return f"{name}[{value}]"
-        return name
-    elif isinstance(tree, list):
-        return "[" + ",".join(tree_to_canonical_string(item) for item in tree) + "]"
-    else:
-        return str(tree)
+    def collect_terminals(node: dict | list) -> None:
+        if isinstance(node, dict):
+            name = node.get("name")
+            value = node.get("value")
+            children = node.get("children", [])
+
+            # Skip PREFIX declarations entirely
+            if name == "PrefixDecl":
+                return
+
+            if value and not children:
+                # Terminal node - add its value
+                terminals.append(value)
+
+            # Recurse into children
+            for child in children:
+                collect_terminals(child)
+        elif isinstance(node, list):
+            for item in node:
+                collect_terminals(item)
+
+    collect_terminals(tree)
+    return " ".join(terminals)
 
 
 def collect_present_nodes(tree: dict | list, present: set[str]) -> None:
@@ -466,8 +501,7 @@ def main() -> None:
     unique_patterns_norm_props: set[str] = set()  # Normalize everything including properties
 
     # Track unique literals (global across all queries)
-    all_string_literals: set[str] = set()
-    all_numeric_literals: set[str] = set()
+    all_literals: set[str] = set()
 
     # Track languages: per-query sets, then aggregate into a Counter
     language_counter: Counter[str] = Counter()  # How many queries use each language
@@ -551,7 +585,7 @@ def main() -> None:
             collect_iris(tree, iris_by_prefix, query_prefix_map)
 
             # Collect literals
-            collect_literals(tree, all_string_literals, all_numeric_literals)
+            collect_literals(tree, all_literals)
 
             # Collect languages (per-query set, then update global counter)
             query_languages: set[str] = set()
@@ -564,13 +598,13 @@ def main() -> None:
             # Normalize and track unique patterns
             # Mode 1: Keep properties, normalize entities/variables/literals
             normalized_keep_props = normalize_tree(tree, normalize_properties=False)
-            canonical_keep_props = tree_to_canonical_string(normalized_keep_props)
-            unique_patterns_keep_props.add(canonical_keep_props)
+            normalized_sparql_keep_props = tree_to_sparql(normalized_keep_props)
+            unique_patterns_keep_props.add(normalized_sparql_keep_props)
 
             # Mode 2: Normalize everything including properties
             normalized_norm_props = normalize_tree(tree, normalize_properties=True)
-            canonical_norm_props = tree_to_canonical_string(normalized_norm_props)
-            unique_patterns_norm_props.add(canonical_norm_props)
+            normalized_sparql_norm_props = tree_to_sparql(normalized_norm_props)
+            unique_patterns_norm_props.add(normalized_sparql_norm_props)
 
         except Exception as e:
             print(f"SPARQL parse error: {e}", file=sys.stderr)
@@ -674,12 +708,8 @@ def main() -> None:
         print(f"\n{'-' * 60}")
         print("Unique Literals:")
         print(f"{'-' * 60}")
-        n_strings = len(all_string_literals)
-        n_numbers = len(all_numeric_literals)
-        n_total_literals = n_strings + n_numbers
+        n_total_literals = len(all_literals)
         print(f"  Total unique literals: {n_total_literals:,}")
-        print(f"    Strings: {n_strings:,}")
-        print(f"    Numbers: {n_numbers:,}")
 
         # Language statistics
         print(f"\n{'-' * 60}")
