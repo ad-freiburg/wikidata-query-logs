@@ -850,10 +850,11 @@ def get_languages(query: str, parser) -> set[str]:
 
 class TestCollectLiterals:
     def test_string_literal(self, parser):
+        """String literals should have quotes stripped."""
         literals = get_literals(
             'SELECT ?x WHERE { ?x <http://a> "hello" }', parser
         )
-        assert '"hello"' in literals
+        assert 'hello' in literals
         assert len(literals) == 1
 
     def test_integer_literal(self, parser):
@@ -883,24 +884,33 @@ class TestCollectLiterals:
         )
         # 2 strings + 1 number = 3 total
         assert len(literals) == 3
-        assert '"hello"' in literals
-        assert '"world"' in literals
+        assert 'hello' in literals
+        assert 'world' in literals
         assert '42' in literals
 
     def test_language_tagged_string_collected(self, parser):
-        """The string part of a lang-tagged literal should still be collected."""
+        """The string part of a lang-tagged literal should be collected without quotes."""
         literals = get_literals(
             'SELECT ?x WHERE { ?x <http://a> "hello"@en }', parser
         )
-        assert '"hello"' in literals
+        assert 'hello' in literals
 
     def test_typed_literal_string_collected(self, parser):
-        """The string part of a typed literal (e.g. xsd:date) should be collected."""
+        """The string part of a typed literal (e.g. xsd:date) should be collected without quotes."""
         literals = get_literals(
             'SELECT ?x WHERE { ?x <http://a> "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#date> }',
             parser,
         )
-        assert '"2024-01-01"' in literals
+        assert '2024-01-01' in literals
+
+    def test_numeric_and_string_same_value_deduplicated(self, parser):
+        """400, "400", and "400"^^xsd:integer should all be counted as one literal."""
+        literals = get_literals(
+            'SELECT ?x WHERE { ?x <http://a> 400 . ?x <http://b> "400" . ?x <http://c> "400"^^<http://www.w3.org/2001/XMLSchema#integer> }',
+            parser,
+        )
+        assert len(literals) == 1
+        assert '400' in literals
 
     def test_no_literals(self, parser):
         literals = get_literals(

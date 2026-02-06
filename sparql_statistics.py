@@ -138,12 +138,24 @@ NUMERIC_LITERAL_NODES = {"INTEGER", "DECIMAL", "DOUBLE", "INTEGER_POSITIVE", "IN
 
 
 def collect_literals(tree: dict | list, literals: set[str]) -> None:
-    """Recursively collect unique literals (both string and numeric) from the parse tree."""
+    """Recursively collect unique literals (both string and numeric) from the parse tree.
+
+    Normalizes literal values by stripping quotes from string literals so that:
+    - 400, "400", '400', and "400"^^xsd:integer all become 400
+    - "hello", 'hello', and "hello"@en all become hello
+    """
     if isinstance(tree, dict):
         name = tree.get("name")
         value = tree.get("value")
         if name in STRING_LITERAL_NODES and value:
-            literals.add(value)
+            # Strip quotes from string literals (single, double, or triple)
+            # Handle """ ''' " ' in that order
+            normalized_value = value
+            for quote in ['"""', "'''", '"', "'"]:
+                if normalized_value.startswith(quote) and normalized_value.endswith(quote):
+                    normalized_value = normalized_value[len(quote):-len(quote)]
+                    break
+            literals.add(normalized_value)
         elif name in NUMERIC_LITERAL_NODES and value:
             literals.add(value)
         for child in tree.get("children", []):
