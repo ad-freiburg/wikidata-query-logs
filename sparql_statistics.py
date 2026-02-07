@@ -564,6 +564,74 @@ def count_node_occurrences(tree: dict | list, node_name: str) -> int:
     return count
 
 
+# Constructs we're interested in tracking (terminals from sparql.l and rules from sparql.y)
+CONSTRUCTS_OF_INTEREST = [
+    # Query types (terminals)
+    ("SELECT", "SELECT query"),
+    ("CONSTRUCT", "CONSTRUCT query"),
+    ("DESCRIBE", "DESCRIBE query"),
+    ("ASK", "ASK query"),
+    # Graph pattern keywords (terminals)
+    ("UNION", "UNION"),
+    ("MINUS", "MINUS"),
+    ("OPTIONAL", "OPTIONAL"),
+    ("FILTER", "FILTER"),
+    ("SERVICE", "SERVICE"),
+    ("BIND", "BIND"),
+    ("VALUES", "VALUES"),
+    ("EXISTS", "EXISTS"),
+    # Solution modifier keywords (terminals)
+    ("GROUP", "GROUP BY"),
+    ("HAVING", "HAVING"),
+    ("ORDER", "ORDER BY"),
+    ("LIMIT", "LIMIT"),
+    ("OFFSET", "OFFSET"),
+    ("DISTINCT", "DISTINCT"),
+    # Aggregate keywords (terminals)
+    ("COUNT", "COUNT"),
+    ("SUM", "SUM"),
+    ("MIN", "MIN"),
+    ("MAX", "MAX"),
+    ("AVG", "AVG"),
+    ("SAMPLE", "SAMPLE"),
+    ("GROUP_CONCAT", "GROUP_CONCAT"),
+    # Property paths (literal tokens)
+    ("|", "Path alternative (|)"),
+    ("/", "Path sequence (/)"),
+    ("PathMod", "Path modifier (?, *, +)"),
+    # Subquery (rule)
+    ("SubSelect", "Subquery"),
+]
+
+# Basic features: triple patterns, FILTER, ORDER BY, LIMIT, OFFSET, DISTINCT, query type
+BASIC_CONSTRUCTS = {
+    "FILTER",
+    "ORDER",
+    "LIMIT",
+    "OFFSET",
+    "DISTINCT",
+    "SELECT",
+    "ASK",
+    "CONSTRUCT",
+    "DESCRIBE",
+}
+
+
+def is_advanced_query(tree: dict | list) -> bool:
+    """
+    Check if a query is classified as advanced.
+
+    A query is advanced if it uses any tracked construct beyond basic features.
+    Basic features are: triple patterns, FILTER, ORDER BY, LIMIT, OFFSET, DISTINCT, and query types.
+    """
+    present: set[str] = set()
+    collect_present_nodes(tree, present)
+
+    tracked_constructs = {node for node, _ in CONSTRUCTS_OF_INTEREST}
+    advanced_in_query = (present & tracked_constructs) - BASIC_CONSTRUCTS
+    return len(advanced_in_query) > 0
+
+
 def main() -> None:
     parser = load_sparql_parser()
 
@@ -578,22 +646,46 @@ def main() -> None:
     # Track triple pattern counts per query
     triple_pattern_counts: list[int] = []
 
-    # Track queries using advanced SPARQL constructs
-    advanced_constructs = {
-        "UNION",
-        "MINUS",
-        "OPTIONAL",
-        "GROUP",
-        "|",
-        "/",
-        "PathMod",
-        "SubSelect",
-    }
+    # Track queries using advanced constructs (anything beyond basic features)
     queries_with_advanced = 0
 
     # Track queries using any property path feature
     path_constructs = {"|", "/", "PathMod"}
     queries_with_paths = 0
+
+    # Track queries using any aggregate function
+    aggregate_constructs = {"COUNT", "SUM", "MIN", "MAX", "AVG", "SAMPLE", "GROUP_CONCAT"}
+    queries_with_aggregates = 0
+
+    # Track queries using LIMIT or OFFSET (pagination)
+    pagination_constructs = {"LIMIT", "OFFSET"}
+    queries_with_pagination = 0
+
+    # Track queries using any non-aggregate function (including BIND)
+    function_constructs = {
+        # String functions
+        "STR", "LANG", "LANGMATCHES", "DATATYPE", "CONCAT", "STRLEN",
+        "UCASE", "LCASE", "ENCODE_FOR_URI", "CONTAINS", "STRSTARTS", "STRENDS",
+        "STRBEFORE", "STRAFTER", "SUBSTR", "REPLACE", "STRLANG", "STRDT",
+        # Numeric functions
+        "ABS", "CEIL", "FLOOR", "ROUND", "RAND",
+        # Date/Time functions
+        "YEAR", "MONTH", "DAY", "HOURS", "MINUTES", "SECONDS",
+        "TIMEZONE", "TZ", "NOW",
+        # Hash functions
+        "MD5", "SHA1", "SHA256", "SHA384", "SHA512",
+        # Node functions
+        "IRI", "URI", "BNODE", "UUID", "STRUUID",
+        # Type checking functions
+        "BOUND", "SAMETERM", "ISIRI", "ISURI", "ISBLANK", "ISLITERAL", "ISNUMERIC",
+        # Conditional functions
+        "COALESCE", "IF",
+        # Pattern matching
+        "REGEX",
+        # Variable binding (treated as function for this metric)
+        "BIND",
+    }
+    queries_with_functions = 0
 
     # Track IRIs by prefix (including "other:" for unknown Wikidata prefixes)
     iris_by_prefix: dict[str, set[str]] = {
@@ -615,45 +707,6 @@ def main() -> None:
     # Track languages: per-query sets, then aggregate into a Counter
     language_counter: Counter[str] = Counter()  # How many queries use each language
     queries_with_language: int = 0
-
-    # Constructs we're interested in (terminals from sparql.l and rules from sparql.y)
-    constructs_of_interest = [
-        # Query types (terminals)
-        ("SELECT", "SELECT query"),
-        ("CONSTRUCT", "CONSTRUCT query"),
-        ("DESCRIBE", "DESCRIBE query"),
-        ("ASK", "ASK query"),
-        # Graph pattern keywords (terminals)
-        ("UNION", "UNION"),
-        ("MINUS", "MINUS"),
-        ("OPTIONAL", "OPTIONAL"),
-        ("FILTER", "FILTER"),
-        ("SERVICE", "SERVICE"),
-        ("BIND", "BIND"),
-        ("VALUES", "VALUES"),
-        ("EXISTS", "EXISTS"),
-        # Solution modifier keywords (terminals)
-        ("GROUP", "GROUP BY"),
-        ("HAVING", "HAVING"),
-        ("ORDER", "ORDER BY"),
-        ("LIMIT", "LIMIT"),
-        ("OFFSET", "OFFSET"),
-        ("DISTINCT", "DISTINCT"),
-        # Aggregate keywords (terminals)
-        ("COUNT", "COUNT"),
-        ("SUM", "SUM"),
-        ("MIN", "MIN"),
-        ("MAX", "MAX"),
-        ("AVG", "AVG"),
-        ("SAMPLE", "SAMPLE"),
-        ("GROUP_CONCAT", "GROUP_CONCAT"),
-        # Property paths (literal tokens)
-        ("|", "Path alternative (|)"),
-        ("/", "Path sequence (/)"),
-        ("PathMod", "Path modifier (?, *, +)"),
-        # Subqueries (rule)
-        ("SubSelect", "Subquery"),
-    ]
 
     for line in tqdm(sys.stdin, desc="Processing queries", unit=" queries"):
         line = line.strip()
@@ -677,13 +730,27 @@ def main() -> None:
             for node in present:
                 construct_presence[node] += 1
 
-            # Check for advanced constructs
-            if present & advanced_constructs:
+            # Check for advanced constructs (any tracked construct beyond basic features)
+            tracked_constructs = {node for node, _ in CONSTRUCTS_OF_INTEREST}
+            advanced_in_query = (present & tracked_constructs) - BASIC_CONSTRUCTS
+            if advanced_in_query:
                 queries_with_advanced += 1
 
             # Check for property paths
             if present & path_constructs:
                 queries_with_paths += 1
+
+            # Check for aggregates
+            if present & aggregate_constructs:
+                queries_with_aggregates += 1
+
+            # Check for pagination
+            if present & pagination_constructs:
+                queries_with_pagination += 1
+
+            # Check for functions
+            if present & function_constructs:
+                queries_with_functions += 1
 
             # Count triple patterns
             triple_count = count_node_occurrences(tree, "TriplesSameSubjectPath")
@@ -731,12 +798,6 @@ def main() -> None:
     print(f"Successfully parsed: {successfully_parsed}")
 
     if successfully_parsed > 0:
-        adv_pct = queries_with_advanced / successfully_parsed * 100
-        print(
-            f"Queries with advanced constructs: {queries_with_advanced} ({adv_pct:.1f}%)"
-        )
-        path_pct = queries_with_paths / successfully_parsed * 100
-        print(f"Queries with property paths: {queries_with_paths} ({path_pct:.1f}%)")
         # Triple pattern statistics
         print(f"\n{'-' * 60}")
         print("Triple Pattern Statistics:")
@@ -768,10 +829,22 @@ def main() -> None:
         print("Construct Presence (queries containing at least one):")
         print(f"{'-' * 60}")
 
-        for node_name, display_name in constructs_of_interest:
+        for node_name, display_name in CONSTRUCTS_OF_INTEREST:
             count = construct_presence.get(node_name, 0)
             pct = count / successfully_parsed * 100
             print(f"  {display_name}: {count} ({pct:.1f}%)")
+
+        # Summary lines for composite constructs
+        pag_pct = queries_with_pagination / successfully_parsed * 100
+        print(f"  LIMIT/OFFSET (any): {queries_with_pagination} ({pag_pct:.1f}%)")
+        func_pct = queries_with_functions / successfully_parsed * 100
+        print(f"  Functions (any): {queries_with_functions} ({func_pct:.1f}%)")
+        agg_pct = queries_with_aggregates / successfully_parsed * 100
+        print(f"  Aggregates (any): {queries_with_aggregates} ({agg_pct:.1f}%)")
+        path_pct = queries_with_paths / successfully_parsed * 100
+        print(f"  Property paths (any): {queries_with_paths} ({path_pct:.1f}%)")
+        adv_pct = queries_with_advanced / successfully_parsed * 100
+        print(f"  Advanced constructs (any): {queries_with_advanced} ({adv_pct:.1f}%)")
 
         # Unique IRIs by prefix
         print(f"\n{'-' * 60}")
@@ -810,9 +883,9 @@ def main() -> None:
         pct_keep = n_keep / successfully_parsed * 100
         pct_norm = n_norm / successfully_parsed * 100
 
-        print(f"  Keeping properties (normalize entities/vars/literals):")
+        print("  Keeping properties (normalize entities/vars/literals):")
         print(f"    Unique patterns: {n_keep:,} ({pct_keep:.1f}% of queries)")
-        print(f"  Normalizing properties (normalize everything):")
+        print("  Normalizing properties (normalize everything):")
         print(f"    Unique patterns: {n_norm:,} ({pct_norm:.1f}% of queries)")
 
         # Literal statistics
@@ -829,7 +902,7 @@ def main() -> None:
         lang_pct = queries_with_language / successfully_parsed * 100
         print(f"  Queries using language: {queries_with_language:,} ({lang_pct:.1f}%)")
         if language_counter:
-            print(f"  Language distribution (by number of queries):")
+            print("  Language distribution (by number of queries):")
             for lang, count in language_counter.most_common():
                 pct = count / successfully_parsed * 100
                 print(f"    {lang}: {count:,} ({pct:.1f}%)")

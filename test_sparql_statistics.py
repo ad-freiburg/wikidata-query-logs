@@ -9,6 +9,7 @@ from sparql_statistics import (
     count_node_occurrences,
     extract_prefix_declarations,
     get_wikidata_prefix,
+    is_advanced_query,
     normalize_tree,
     tree_to_sparql,
 )
@@ -1007,6 +1008,179 @@ class TestCollectLanguages:
         """Query without any language constructs."""
         langs = get_languages("SELECT ?x WHERE { ?x <http://a> ?y }", parser)
         assert len(langs) == 0
+
+
+class TestAdvancedConstructs:
+    """Test the classification of queries as advanced or basic."""
+
+    # Test basic queries (not advanced)
+    def test_simple_select_not_advanced(self, parser):
+        """Simple SELECT query should NOT be classified as advanced."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x ?p ?o }", parser)
+        assert not is_advanced_query(tree)
+
+    def test_select_with_filter_not_advanced(self, parser):
+        """SELECT with FILTER should NOT be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x <http://a> ?y FILTER(?y > 10) }", parser
+        )
+        assert not is_advanced_query(tree)
+
+    def test_select_with_filter_lang_not_advanced(self, parser):
+        """SELECT with FILTER using LANG function should NOT be classified as advanced."""
+        tree = parse_sparql(
+            'SELECT ?x WHERE { ?x rdfs:label ?label . FILTER(LANG(?label) = "en") }',
+            parser,
+        )
+        assert not is_advanced_query(tree)
+
+    def test_select_with_order_not_advanced(self, parser):
+        """SELECT with ORDER BY should NOT be classified as advanced."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x <http://a> ?y } ORDER BY ?x", parser)
+        assert not is_advanced_query(tree)
+
+    def test_select_with_limit_not_advanced(self, parser):
+        """SELECT with LIMIT should NOT be classified as advanced."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x <http://a> ?y } LIMIT 10", parser)
+        assert not is_advanced_query(tree)
+
+    def test_select_with_offset_not_advanced(self, parser):
+        """SELECT with OFFSET should NOT be classified as advanced."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x <http://a> ?y } OFFSET 5", parser)
+        assert not is_advanced_query(tree)
+
+    def test_select_with_distinct_not_advanced(self, parser):
+        """SELECT DISTINCT should NOT be classified as advanced."""
+        tree = parse_sparql("SELECT DISTINCT ?x WHERE { ?x <http://a> ?y }", parser)
+        assert not is_advanced_query(tree)
+
+    def test_select_with_all_basic_features_not_advanced(self, parser):
+        """SELECT with all basic features should NOT be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT DISTINCT ?x WHERE { ?x <http://a> ?y FILTER(?y > 10) } ORDER BY ?x LIMIT 10 OFFSET 5",
+            parser,
+        )
+        assert not is_advanced_query(tree)
+
+    def test_ask_query_not_advanced(self, parser):
+        """ASK query should NOT be classified as advanced."""
+        tree = parse_sparql("ASK { ?x ?p ?o }", parser)
+        assert not is_advanced_query(tree)
+
+    def test_construct_query_not_advanced(self, parser):
+        """CONSTRUCT query should NOT be classified as advanced."""
+        tree = parse_sparql("CONSTRUCT { ?x ?p ?o } WHERE { ?x ?p ?o }", parser)
+        assert not is_advanced_query(tree)
+
+    # Test advanced queries
+    def test_union_is_advanced(self, parser):
+        """Query with UNION should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { { ?x <http://a> ?y } UNION { ?x <http://b> ?y } }",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_optional_is_advanced(self, parser):
+        """Query with OPTIONAL should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x <http://a> ?y OPTIONAL { ?x <http://b> ?z } }",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_minus_is_advanced(self, parser):
+        """Query with MINUS should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x <http://a> ?y MINUS { ?x <http://b> ?z } }",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_group_by_is_advanced(self, parser):
+        """Query with GROUP BY should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x (COUNT(?y) AS ?c) WHERE { ?x <http://a> ?y } GROUP BY ?x",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_having_is_advanced(self, parser):
+        """Query with HAVING should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x (COUNT(?y) AS ?c) WHERE { ?x <http://a> ?y } GROUP BY ?x HAVING (COUNT(?y) > 1)",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_count_is_advanced(self, parser):
+        """Query with COUNT aggregate should be classified as advanced."""
+        tree = parse_sparql("SELECT (COUNT(?x) AS ?c) WHERE { ?x ?p ?o }", parser)
+        assert is_advanced_query(tree)
+
+    def test_sum_is_advanced(self, parser):
+        """Query with SUM aggregate should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT (SUM(?y) AS ?s) WHERE { ?x <http://a> ?y }", parser
+        )
+        assert is_advanced_query(tree)
+
+    def test_bind_is_advanced(self, parser):
+        """Query with BIND should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x ?z WHERE { ?x <http://a> ?y BIND(?y + 1 AS ?z) }", parser
+        )
+        assert is_advanced_query(tree)
+
+    def test_values_is_advanced(self, parser):
+        """Query with VALUES should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { VALUES ?x { <http://a> <http://b> } ?x ?p ?o }",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_property_path_sequence_is_advanced(self, parser):
+        """Query with property path sequence (/) should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x <http://a>/<http://b> ?y }", parser
+        )
+        assert is_advanced_query(tree)
+
+    def test_property_path_alternative_is_advanced(self, parser):
+        """Query with property path alternative (|) should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x (<http://a>|<http://b>) ?y }", parser
+        )
+        assert is_advanced_query(tree)
+
+    def test_property_path_modifier_is_advanced(self, parser):
+        """Query with property path modifier (*, +, ?) should be classified as advanced."""
+        tree = parse_sparql("SELECT ?x WHERE { ?x <http://a>* ?y }", parser)
+        assert is_advanced_query(tree)
+
+    def test_subquery_is_advanced(self, parser):
+        """Query with subquery should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { { SELECT ?x WHERE { ?x <http://a> ?y } } ?x <http://b> ?z }",
+            parser,
+        )
+        assert is_advanced_query(tree)
+
+    def test_service_is_advanced(self, parser):
+        """Query with SERVICE should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { SERVICE <http://endpoint> { ?x ?p ?o } }", parser
+        )
+        assert is_advanced_query(tree)
+
+    def test_exists_is_advanced(self, parser):
+        """Query with EXISTS should be classified as advanced."""
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x <http://a> ?y FILTER EXISTS { ?x <http://b> ?z } }",
+            parser,
+        )
+        assert is_advanced_query(tree)
 
 
 class TestNormalizeLanguageTags:
