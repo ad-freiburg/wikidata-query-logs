@@ -1,6 +1,6 @@
 # Wikidata Query Logs Dataset (WDQL)
 
-A dataset of SPARQL-question pairs built from
+A dataset of question-SPARQL-pairs built from
 [Wikidata Query Logs](https://iccl.inf.tu-dresden.de/web/Wikidata_SPARQL_Logs/en)
 from 2017 to 2018.
 
