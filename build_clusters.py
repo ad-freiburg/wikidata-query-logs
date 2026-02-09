@@ -31,6 +31,8 @@ def cluster_hdbscan(
     valid_mask: np.ndarray,
     min_cluster_size: int = 2,
     min_samples: int = 1,
+    epsilon: float = 0.0,
+    method: str = "eom",
     umap_n_components: int = 50,
     umap_n_neighbors: int = 30,
 ) -> np.ndarray:
@@ -42,6 +44,8 @@ def cluster_hdbscan(
         valid_mask: Boolean mask indicating valid samples
         min_cluster_size: Minimum cluster size for HDBSCAN
         min_samples: Minimum samples in a neighborhood for HDBSCAN
+        epsilon: Cluster selection epsilon for HDBSCAN
+        method: Cluster selection method for HDBSCAN
         umap_n_components: Target dimensionality for UMAP reduction (before clustering)
         umap_n_neighbors: Number of neighbors for UMAP
 
@@ -79,7 +83,8 @@ def cluster_hdbscan(
         min_cluster_size=min_cluster_size,
         min_samples=min_samples,
         metric="euclidean",
-        cluster_selection_method="eom",
+        cluster_selection_epsilon=epsilon,
+        cluster_selection_method=method,
     )
     valid_labels = clusterer.fit_predict(valid_vectors_reduced)
 
@@ -179,6 +184,18 @@ def main() -> None:
         help="Minimum samples for HDBSCAN (default: 1 - very liberal clustering)",
     )
     parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.0,
+        help="Cluster selection epsilon for HDBSCAN (default: 0.0 - no minimum distance required)",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="eom",
+        help="Cluster selection method for HDBSCAN (default: 'eom')",
+    )
+    parser.add_argument(
         "--umap-n-components",
         type=int,
         default=50,
@@ -222,6 +239,8 @@ def main() -> None:
         valid_mask,
         args.min_cluster_size,
         args.min_samples,
+        args.epsilon,
+        args.method,
         args.umap_n_components,
         args.umap_n_neighbors,
     )
