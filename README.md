@@ -7,8 +7,8 @@ from 2017 to 2018.
 # Overview
 
 The two most important files are:
-- [wdql-all.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-all.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
-- [wdql-uniq.tar.gz](https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wdql-uniq.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
+- [wdql-all.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-all.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- [wdql-uniq.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-uniq.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 
 Both archives contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
 Each line in these files is a JSON object with the following structure:
@@ -35,7 +35,7 @@ Each line in these files is a JSON object with the following structure:
 
 ## All Downloads
 
-All assets are available for download at https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs:
+All assets are available for download at https://wdql.cs.uni-freiburg.de/data:
 
 - `organic-query-logs.tar.gz`: Raw Wikidata SPARQL query logs as TSV files
 - `organic.tar.gz`: Processed and deduplicated query logs in a single JSONL file
@@ -63,7 +63,7 @@ pip install -r requirements.txt
 
 ```bash
 # Download and extract raw query logs
-curl -L https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/organic-query-logs.tar.gz \
+curl -L https://wdql.cs.uni-freiburg.de/data/organic-query-logs.tar.gz \
   | tar -xzv -C data/
 # Build organic.jsonl from TSV files
 python prepare_input.py data/*.tsv data/
@@ -133,7 +133,7 @@ Generate some statistics about WDQL and other Wikidata datasets:
 
 ```bash
 # Download and extract other Wikidata benchmarks
-curl -L https://ad-publications.cs.uni-freiburg.de/wikidata-query-logs/wikidata-benchmarks.tar.gz \
+curl -L https://wdql.cs.uni-freiburg.de/data/wikidata-benchmarks.tar.gz \
   | tar -xzv -C data/
 
 # Generate statistics
@@ -156,9 +156,3 @@ streamlit run visualize_app.py
 
 > Note: To run the app, you need to complete step 4 above or download
 > and extract `organic-qwen3-next-80b-a3b-dataset.tar.gz` first.
-
-## Declaration on AI
-
-The code in this repository was written with the help of AI coding assistants, in
-particular Claude Code. All AI-generated code was reviewed and edited by human
-developers to ensure correctness and quality.
