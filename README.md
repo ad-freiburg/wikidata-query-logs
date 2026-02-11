@@ -53,32 +53,32 @@ the corresponding steps in the pipeline below.
 | Stage | Number |
 |-------|--------|
 | **Data Collection** | |
-| Raw organic SPARQL logs | 3,530,955 |
-| After deduplication | 859,305 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Raw organic SPARQL logs | 3,530,955 |
+| &nbsp;&nbsp;&nbsp;&nbsp;After deduplication | 859,305 |
 | **SPARQL Fixing and Question Generation with GRASP** | |
-| Processed samples | 314,430 |
-| &nbsp;&nbsp;With questions (68.5%) | 215,256 |
-| &nbsp;&nbsp;Without questions (31.5%) | 99,174 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Model API failure | 78,104 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Model output failure | 18,280 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Cancelled via `CAN` | 2,770 |
-| &nbsp;&nbsp;&nbsp;&nbsp;Model stuck in loop | 20 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Processed samples | 314,430 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;With questions (68.5%) | 215,256 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Without questions (31.5%) | 99,174 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model API failure | 78,104 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model output failure | 18,280 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Cancelled via `CAN` | 2,770 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model stuck in loop | 20 |
 | **Validation** | |
-| Valid (93.0%) | 200,186 |
-| Invalid (7.0%) | 15,070 |
-| &nbsp;&nbsp;SPARQL parsing failed | 392 |
-| &nbsp;&nbsp;SPARQL execution failed | 3,111 |
-| &nbsp;&nbsp;Empty SPARQL result | 11,567 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Valid (93.0%) | 200,186 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Invalid (7.0%) | 15,070 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPARQL parsing failed | 392 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPARQL execution failed | 3,111 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Empty SPARQL result | 11,567 |
 | **Clustering** | |
-| Clustered samples (valid) | 200,186 |
-| &nbsp;&nbsp;Num. clusters | 103,327 |
-| &nbsp;&nbsp;Max. cluster size | 146 |
-| &nbsp;&nbsp;Avg. cluster size | 1.94 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Clustered samples (valid) | 200,186 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Num. clusters | 103,327 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Max. cluster size | 146 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Avg. cluster size | 1.94 |
 | **KGQA Datasets** | |
-| WDQL (one-per-cluster) | 103,327 |
-| &nbsp;&nbsp;Train / Val / Test | 82,661 / 10,333 / 10,333 |
-| WDQL (all) | 200,186 |
-| &nbsp;&nbsp;Train / Val / Test | 159,815 / 20,485 / 19,886 |
+| &nbsp;&nbsp;&nbsp;&nbsp;WDQL (one-per-cluster) | 103,327 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 82,661 / 10,333 / 10,333 |
+| &nbsp;&nbsp;&nbsp;&nbsp;WDQL | 200,186 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 159,815 / 20,485 / 19,886 |
 
 ## Pipeline
 
