@@ -7,8 +7,8 @@ from 2017 to 2018.
 # Overview
 
 The two most important files are:
-- [wdql-all.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-all.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
-- [wdql-uniq.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-uniq.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
+- [wdql.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- [wdql-one-per-cluster.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-one-per-cluster.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 
 Both archives contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
 Each line in these files is a JSON object with the following structure:
@@ -30,8 +30,8 @@ Each line in these files is a JSON object with the following structure:
 ```
 
 > Note: If you want to use WDQL for something else than KGQA, you can just
-> concatenate all JSONL files after downloading and extracting `wdql-all.tar.gz` or
-> `wdql-uniq.tar.gz` to get a single file with all question-SPARQL pairs.
+> concatenate all JSONL files after downloading and extracting `wdql.tar.gz` or
+> `wdql-one-per-cluster.tar.gz` to get a single file with all question-SPARQL pairs.
 
 ## All Downloads
 
@@ -41,12 +41,44 @@ All assets are available for download at https://wdql.cs.uni-freiburg.de/data:
 - `organic.tar.gz`: Processed and deduplicated query logs in a single JSONL file
 - `organic-qwen3-next-80b-a3b.tar.gz`: Generated question-SPARQL samples with GRASP
 - `organic-qwen3-next-80b-a3b-dataset.tar.gz`: Processed GRASP samples with question embeddings and clusters
-- `wdql-uniq.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
-- `wdql-all.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- `wdql.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- `wdql-one-per-cluster.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 - `wikidata-benchmarks.tar.gz`: Other Wikidata benchmarks (for comparison)
 
 Download and extract these files into a subdirectory named `data/` to skip
 the corresponding steps in the pipeline below.
+
+## Dataset Creation Statistics
+
+| Stage | Number |
+|-------|--------|
+| **Data Collection** | |
+| Raw organic SPARQL logs | 3,530,955 |
+| After deduplication | 859,305 |
+| **SPARQL Fixing and Question Generation with GRASP** | |
+| Processed samples | 314,430 |
+| &nbsp;&nbsp;With questions (68.5%) | 215,256 |
+| &nbsp;&nbsp;Without questions (31.5%) | 99,174 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Model API failure | 78,104 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Model output failure | 18,280 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Cancelled via `CAN` | 2,770 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Model stuck in loop | 20 |
+| **Validation** | |
+| Valid (93.0%) | 200,186 |
+| Invalid (7.0%) | 15,070 |
+| &nbsp;&nbsp;SPARQL parsing failed | 392 |
+| &nbsp;&nbsp;SPARQL execution failed | 3,111 |
+| &nbsp;&nbsp;Empty SPARQL result | 11,567 |
+| **Clustering** | |
+| Clustered samples (valid) | 200,186 |
+| &nbsp;&nbsp;Num. clusters | 103,327 |
+| &nbsp;&nbsp;Max. cluster size | 146 |
+| &nbsp;&nbsp;Avg. cluster size | 1.94 |
+| **KGQA Datasets** | |
+| WDQL (one-per-cluster) | 103,327 |
+| &nbsp;&nbsp;Train / Val / Test | 82,661 / 10,333 / 10,333 |
+| WDQL (all) | 200,186 |
+| &nbsp;&nbsp;Train / Val / Test | 159,815 / 20,485 / 19,886 |
 
 ## Pipeline
 
@@ -123,7 +155,7 @@ python build_clusters.py
 # WDQL uniq dataset (one sample per cluster)
 python export_kgqa_dataset.py
 # WDQL all dataset (all samples per cluster)
-python export_kgqa_dataset.py --output-dir data/wdql-all \
+python export_kgqa_dataset.py --output-dir data/wdql \
   --samples-per-cluster -1
 ```
 
@@ -137,13 +169,13 @@ curl -L https://wdql.cs.uni-freiburg.de/data/wikidata-benchmarks.tar.gz \
   | tar -xzv -C data/
 
 # Generate statistics
-for bench in data/(wdql-all|wdql-uniq|spinach|simplequestions|qald7|wwq|qawiki|lcquad2|qald10); \
+for bench in data/(wdql|wdql-one-per-cluster|spinach|simplequestions|qald7|wwq|qawiki|lcquad2|qald10); \
   do cat $bench/*.jsonl | jq '.sparql' | python sparql_statistics.py \
   > $bench/statistics.txt; \
 done
 ```
 
-> Note: To generate statistics for `wdql-all` and `wdql-uniq`, you need to
+> Note: To generate statistics for `wdql` and `wdql-one-per-cluster`, you need to
 > complete step 5 above or download and extract the corresponding files first.
 
 ## Visualization
