@@ -1,3 +1,4 @@
+import argparse
 import random
 import re
 from pathlib import Path
@@ -118,28 +119,33 @@ def create_dataframe(
     return pd.DataFrame(data)
 
 
-def main() -> None:
-    st.set_page_config(page_title="Wikidata Query Embeddings", layout="wide")
-
-    st.title("🔍 Wikidata Query-SPARQL Embeddings Visualization")
-
-    # Sidebar
-    st.sidebar.header("Settings")
-
-    dataset_dir = st.sidebar.text_input(
-        "Data Directory",
-        value="data/organic-qwen3-next-80b-a3b-dataset",
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Streamlit app to visualize the WDQL dataset"
     )
+    parser.add_argument(
+        "--dataset-dir",
+        type=str,
+        default="data/organic-qwen3-next-80b-a3b-dataset",
+        help="Directory containing the dataset with samples and clusters",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    st.set_page_config(page_title="Wikidata Query Logs Dataset", layout="wide")
+
+    st.title("🔍 Wikidata Query Logs Dataset Visualization")
 
     # Load data
     try:
-        samples, labels, coords, cluster_stats = load_data(dataset_dir)
+        samples, labels, coords, cluster_stats = load_data(args.dataset_dir)
     except FileNotFoundError as e:
         st.error(f"Error loading data: {e}")
         st.info(
-            "Make sure you have run:\n"
-            "1. `python generate_embeddings.py`\n"
-            "2. `python build_clusters.py`"
+            "Make sure you have downloaded and extracted the dataset as per the instructions"
         )
         return
 
