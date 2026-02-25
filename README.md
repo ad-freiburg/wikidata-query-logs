@@ -4,6 +4,10 @@ A dataset of question-SPARQL-pairs built from
 [Wikidata Query Logs](https://iccl.inf.tu-dresden.de/web/Wikidata_SPARQL_Logs/en)
 from 2017 to 2018.
 
+See this [web app](https://wdql.cs.uni-freiburg.de/) to explore the dataset.
+
+See the [paper](https://arxiv.org/pdf/2602.14594) for more details.
+
 # Overview
 
 The two most important files are:
