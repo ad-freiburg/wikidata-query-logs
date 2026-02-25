@@ -1,7 +1,12 @@
 import pytest
 
 from sparql_statistics import (
+    SPARQL_CONSTRUCTS,
     WIKIDATA_IRI_PREFIXES,
+    _extract_iris,
+    _extract_triples,
+    _get_where_body,
+    _jaccard,
     collect_iris,
     collect_languages,
     collect_literals,
@@ -11,6 +16,9 @@ from sparql_statistics import (
     get_wikidata_prefix,
     is_advanced_query,
     normalize_tree,
+    remove_label_service,
+    remove_lang_filters,
+    remove_rdfs_label_triples,
     tree_to_sparql,
 )
 from utils import load_sparql_parser, parse_sparql
@@ -1120,9 +1128,7 @@ class TestAdvancedConstructs:
 
     def test_sum_is_advanced(self, parser):
         """Query with SUM aggregate should be classified as advanced."""
-        tree = parse_sparql(
-            "SELECT (SUM(?y) AS ?s) WHERE { ?x <http://a> ?y }", parser
-        )
+        tree = parse_sparql("SELECT (SUM(?y) AS ?s) WHERE { ?x <http://a> ?y }", parser)
         assert is_advanced_query(tree)
 
     def test_bind_is_advanced(self, parser):
@@ -1142,16 +1148,12 @@ class TestAdvancedConstructs:
 
     def test_property_path_sequence_is_advanced(self, parser):
         """Query with property path sequence (/) should be classified as advanced."""
-        tree = parse_sparql(
-            "SELECT ?x WHERE { ?x <http://a>/<http://b> ?y }", parser
-        )
+        tree = parse_sparql("SELECT ?x WHERE { ?x <http://a>/<http://b> ?y }", parser)
         assert is_advanced_query(tree)
 
     def test_property_path_alternative_is_advanced(self, parser):
         """Query with property path alternative (|) should be classified as advanced."""
-        tree = parse_sparql(
-            "SELECT ?x WHERE { ?x (<http://a>|<http://b>) ?y }", parser
-        )
+        tree = parse_sparql("SELECT ?x WHERE { ?x (<http://a>|<http://b>) ?y }", parser)
         assert is_advanced_query(tree)
 
     def test_property_path_modifier_is_advanced(self, parser):
@@ -1383,3 +1385,461 @@ class TestNormalizeWikidataQueries:
             f"Q42/@en: {canonical1}\n"
             f"Q5/@de: {canonical2}"
         )
+
+
+# ── WDQL comparison helpers ───────────────────────────────────────────────────
+
+
+class TestJaccard:
+    def test_identical_sets(self):
+        assert _jaccard({1, 2, 3}, {1, 2, 3}) == 1.0
+
+    def test_disjoint_sets(self):
+        assert _jaccard({1, 2}, {3, 4}) == 0.0
+
+    def test_partial_overlap(self):
+        # |{2}| / |{1, 2, 3, 4}| = 1/4
+        assert _jaccard({1, 2}, {2, 3, 4}) == pytest.approx(1 / 4)
+
+    def test_one_subset_of_other(self):
+        # |{1}| / |{1, 2}| = 1/2
+        assert _jaccard({1}, {1, 2}) == pytest.approx(1 / 2)
+
+    def test_both_empty(self):
+        assert _jaccard(set(), set()) == 1.0
+
+    def test_one_empty(self):
+        assert _jaccard(set(), {1}) == 0.0
+        assert _jaccard({1}, set()) == 0.0
+
+
+def _extract_triples_from_query(
+    query: str, parser, normalize_literals: bool = False
+) -> set[str]:
+    """Parse a query and extract its triple strings."""
+    tree = parse_sparql(query, parser)
+    body = _get_where_body(tree)
+    assert body is not None
+    return _extract_triples(body, normalize_literals=normalize_literals)
+
+
+class TestGetWhereBody:
+    def test_returns_group_graph_pattern(self, parser):
+        tree = parse_sparql("SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser)
+        body = _get_where_body(tree)
+        assert body is not None
+        assert body.get("name") == "GroupGraphPattern"
+
+    def test_ask_query(self, parser):
+        tree = parse_sparql("ASK { ?x wdt:P31 wd:Q5 }", parser)
+        body = _get_where_body(tree)
+        assert body is not None
+        assert body.get("name") == "GroupGraphPattern"
+
+    def test_no_where_clause(self, parser):
+        # DESCRIBE without WHERE has no WhereClause
+        tree = parse_sparql("DESCRIBE wd:Q42", parser)
+        body = _get_where_body(tree)
+        assert body is None
+
+
+class TestRemoveLabelService:
+    def test_removes_wikibase_label_service_by_iri(self, parser):
+        query = (
+            "SELECT ?item ?itemLabel WHERE { "
+            "?item wdt:P31 wd:Q5 . "
+            "SERVICE <http://wikiba.se/ontology#label> { "
+            '  <http://www.bigdata.com/rdf#serviceParam> wikibase:language "en" '
+            "} "
+            "}"
+        )
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped, had = remove_label_service(body)
+        assert had is True
+        # SERVICE node should still exist but have no children
+        from sparql_statistics import _find_all_nodes
+
+        services = _find_all_nodes(stripped, "ServiceGraphPattern")
+        assert all("children" not in s for s in services)
+
+    def test_removes_wikibase_label_service_by_pname(self, parser):
+        query = (
+            "SELECT ?item ?itemLabel WHERE { "
+            "?item wdt:P31 wd:Q5 . "
+            "SERVICE wikibase:label { "
+            '  bd:serviceParam wikibase:language "en" '
+            "} "
+            "}"
+        )
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped, had = remove_label_service(body)
+        assert had is True
+        from sparql_statistics import _find_all_nodes
+
+        services = _find_all_nodes(stripped, "ServiceGraphPattern")
+        assert all("children" not in s for s in services)
+
+    def test_keeps_non_label_service(self, parser):
+        query = "SELECT ?x WHERE { SERVICE <http://other.endpoint/> { ?x ?p ?o } }"
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped, had = remove_label_service(body)
+        assert had is False
+        from sparql_statistics import _find_all_nodes
+
+        services = _find_all_nodes(stripped, "ServiceGraphPattern")
+        assert len(services) == 1
+        assert "children" in services[0]
+
+    def test_no_service_unchanged(self, parser):
+        query = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }"
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped, had = remove_label_service(body)
+        assert had is False
+        from sparql_statistics import _find_all_nodes
+
+        services = _find_all_nodes(stripped, "ServiceGraphPattern")
+        assert len(services) == 0
+
+
+class TestRemoveRdfsLabelTriples:
+    def test_removes_rdfs_label_triple_by_iri(self, parser):
+        query = (
+            "SELECT ?item ?label WHERE { "
+            "?item wdt:P31 wd:Q5 . "
+            "?item <http://www.w3.org/2000/01/rdf-schema#label> ?label "
+            "}"
+        )
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped = remove_rdfs_label_triples(body)
+        from sparql_statistics import _find_all_nodes
+
+        triples = _find_all_nodes(stripped, "TriplesSameSubjectPath")
+        # Only the wdt:P31 triple should remain (with children)
+        with_children = [t for t in triples if "children" in t]
+        assert len(with_children) == 1
+
+    def test_removes_rdfs_label_triple_by_pname(self, parser):
+        query = (
+            "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> "
+            "SELECT ?item ?label WHERE { "
+            "?item wdt:P31 wd:Q5 . "
+            "?item rdfs:label ?label "
+            "}"
+        )
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped = remove_rdfs_label_triples(body)
+        from sparql_statistics import _find_all_nodes
+
+        triples = _find_all_nodes(stripped, "TriplesSameSubjectPath")
+        with_children = [t for t in triples if "children" in t]
+        assert len(with_children) == 1
+
+    def test_keeps_multi_predicate_triple_with_rdfs_label(self, parser):
+        # A triple with multiple predicates (p1 ; rdfs:label) should NOT be removed
+        query = (
+            "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> "
+            "SELECT ?item ?name ?label WHERE { "
+            "?item wdt:P31 wd:Q5 ; rdfs:label ?label "
+            "}"
+        )
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped = remove_rdfs_label_triples(body)
+        from sparql_statistics import _find_all_nodes
+
+        triples = _find_all_nodes(stripped, "TriplesSameSubjectPath")
+        with_children = [t for t in triples if "children" in t]
+        assert len(with_children) == 1
+
+    def test_no_rdfs_label_unchanged(self, parser):
+        query = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }"
+        tree = parse_sparql(query, parser)
+        body = _get_where_body(tree)
+        stripped = remove_rdfs_label_triples(body)
+        from sparql_statistics import _find_all_nodes
+
+        triples = _find_all_nodes(stripped, "TriplesSameSubjectPath")
+        with_children = [t for t in triples if "children" in t]
+        assert len(with_children) == 1
+
+
+class TestExtractTriples:
+    def test_single_triple(self, parser):
+        triples = _extract_triples_from_query(
+            "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser
+        )
+        assert len(triples) == 1
+
+    def test_two_triples(self, parser):
+        triples = _extract_triples_from_query(
+            "SELECT ?x ?y WHERE { ?x wdt:P31 wd:Q5 . ?x wdt:P27 ?y }", parser
+        )
+        assert len(triples) == 2
+
+    def test_variables_normalized_to_placeholder(self, parser):
+        # ?item and ?x should both become ?_ so two structurally identical
+        # queries with different var names produce the same triple strings
+        t1 = _extract_triples_from_query(
+            "SELECT ?item WHERE { ?item wdt:P31 wd:Q5 }", parser
+        )
+        t2 = _extract_triples_from_query("SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser)
+        assert t1 == t2
+
+    def test_entities_and_properties_kept(self, parser):
+        # Entities and properties must not be normalized (only vars are)
+        t1 = _extract_triples_from_query("SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser)
+        t2 = _extract_triples_from_query(
+            "SELECT ?x WHERE { ?x wdt:P31 wd:Q42 }", parser
+        )
+        assert t1 != t2
+
+    def test_different_properties_differ(self, parser):
+        t1 = _extract_triples_from_query("SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser)
+        t2 = _extract_triples_from_query("SELECT ?x WHERE { ?x wdt:P27 wd:Q5 }", parser)
+        assert t1 != t2
+
+    def test_literals_kept_without_normalization(self, parser):
+        t1 = _extract_triples_from_query(
+            'SELECT ?x WHERE { ?x <http://a> "hello" }',
+            parser,
+            normalize_literals=False,
+        )
+        t2 = _extract_triples_from_query(
+            'SELECT ?x WHERE { ?x <http://a> "world" }',
+            parser,
+            normalize_literals=False,
+        )
+        assert t1 != t2
+
+    def test_literals_collapsed_with_normalization(self, parser):
+        t1 = _extract_triples_from_query(
+            'SELECT ?x WHERE { ?x <http://a> "hello" }', parser, normalize_literals=True
+        )
+        t2 = _extract_triples_from_query(
+            'SELECT ?x WHERE { ?x <http://a> "world" }', parser, normalize_literals=True
+        )
+        assert t1 == t2
+
+
+def _iri_jaccard(raw: str, clean: str, parser) -> float:
+    """Convenience: parse two queries and return IRI Jaccard of their WHERE bodies."""
+    raw_tree = parse_sparql(raw, parser)
+    clean_tree = parse_sparql(clean, parser)
+    raw_body = _get_where_body(raw_tree)
+    clean_body = _get_where_body(clean_tree)
+    assert raw_body is not None and clean_body is not None
+    clean_prefix_map = extract_prefix_declarations(clean_tree)
+    return _jaccard(
+        _extract_iris(raw_body),
+        _extract_iris(clean_body, prefix_map=clean_prefix_map),
+    )
+
+
+class TestExtractIRIs:
+    def test_full_iri_extracted(self, parser):
+        tree = parse_sparql(
+            "SELECT ?x WHERE { ?x <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q5> }",
+            parser,
+        )
+        iris = _extract_iris(_get_where_body(tree))
+        assert "<http://www.wikidata.org/prop/direct/P31>" in iris
+        assert "<http://www.wikidata.org/entity/Q5>" in iris
+
+    def test_pname_expanded_with_prefix_map(self, parser):
+        # wdt:P31 and wd:Q5 should expand to full IRIs when prefix_map is provided
+        tree = parse_sparql("SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser)
+        prefix_map = extract_prefix_declarations(tree)
+        iris = _extract_iris(_get_where_body(tree), prefix_map=prefix_map)
+        assert "<http://www.wikidata.org/prop/direct/P31>" in iris
+        assert "<http://www.wikidata.org/entity/Q5>" in iris
+
+    def test_pname_not_expanded_without_prefix_map(self, parser):
+        # Without prefix_map, PNAME_LN nodes are skipped
+        tree = parse_sparql("SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }", parser)
+        iris = _extract_iris(_get_where_body(tree))
+        assert len(iris) == 0
+
+    def test_custom_prefix_expanded(self, parser):
+        query = (
+            "PREFIX myprop: <http://www.wikidata.org/prop/direct/> "
+            "SELECT ?x WHERE { ?x myprop:P31 <http://www.wikidata.org/entity/Q5> }"
+        )
+        tree = parse_sparql(query, parser)
+        prefix_map = extract_prefix_declarations(tree)
+        iris = _extract_iris(_get_where_body(tree), prefix_map=prefix_map)
+        assert "<http://www.wikidata.org/prop/direct/P31>" in iris
+        assert "<http://www.wikidata.org/entity/Q5>" in iris
+
+    def test_literals_and_variables_excluded(self, parser):
+        tree = parse_sparql('SELECT ?x WHERE { ?x <http://a> "hello" }', parser)
+        iris = _extract_iris(_get_where_body(tree))
+        assert iris == {"<http://a>"}
+
+
+class TestIRIJaccard:
+    def test_identical_iris(self, parser):
+        # Raw uses full IRIs, clean uses prefixes for the same IRIs → Jaccard = 1.0
+        raw = "SELECT ?x WHERE { ?x <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q5> }"
+        clean = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }"
+        assert _iri_jaccard(raw, clean, parser) == 1.0
+
+    def test_clean_adds_one_iri(self, parser):
+        # raw has {P31, Q5}, clean has {P31, Q5, P27, Q183} → 2/4 = 1/2
+        raw = "SELECT ?x WHERE { ?x <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q5> }"
+        clean = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 . ?x wdt:P27 wd:Q183 }"
+        assert _iri_jaccard(raw, clean, parser) == pytest.approx(2 / 4)
+
+    def test_completely_different_iris(self, parser):
+        raw = "SELECT ?x WHERE { ?x <http://www.wikidata.org/prop/direct/P18> <http://www.wikidata.org/entity/Q5> }"
+        clean = "SELECT ?x WHERE { ?x wdt:P31 wd:Q42 }"
+        assert _iri_jaccard(raw, clean, parser) == 0.0
+
+    def test_literals_ignored(self, parser):
+        # Literals don't affect IRI Jaccard — only the predicate IRI matters
+        raw = 'SELECT ?x WHERE { ?x <http://www.wikidata.org/prop/direct/P2509> "anon_123" }'
+        clean = 'SELECT ?x WHERE { ?x wdt:P2509 "real value" }'
+        assert _iri_jaccard(raw, clean, parser) == 1.0
+
+    def test_label_service_stripped_matches_rdfs_label_stripped(self, parser):
+        raw = (
+            "SELECT ?item ?itemLabel WHERE { "
+            "?item <http://www.wikidata.org/prop/direct/P31> <http://www.wikidata.org/entity/Q5> . "
+            'SERVICE wikibase:label { bd:serviceParam wikibase:language "en" } '
+            "}"
+        )
+        clean = (
+            "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> "
+            "SELECT ?item ?itemLabel WHERE { "
+            "?item wdt:P31 wd:Q5 . "
+            "?item rdfs:label ?itemLabel "
+            "}"
+        )
+        raw_tree = parse_sparql(raw, parser)
+        clean_tree = parse_sparql(clean, parser)
+        raw_body = _get_where_body(raw_tree)
+        clean_body = _get_where_body(clean_tree)
+        assert raw_body is not None and clean_body is not None
+        clean_prefix_map = extract_prefix_declarations(clean_tree)
+        raw_stripped, had_label_service = remove_label_service(raw_body)
+        clean_stripped = (
+            remove_rdfs_label_triples(clean_body) if had_label_service else clean_body
+        )
+        j = _jaccard(
+            _extract_iris(raw_stripped),
+            _extract_iris(clean_stripped, prefix_map=clean_prefix_map),
+        )
+        assert j == 1.0
+
+
+def _construct_jaccard(raw: str, clean: str, parser) -> float:
+    """Parse raw and clean queries and return Jaccard on SPARQL_CONSTRUCTS node sets.
+    Mirrors main(): strips label service from raw; conditionally strips rdfs:label
+    triples and lang filters from clean only if raw had a label service."""
+    t_raw = parse_sparql(raw, parser)
+    t_clean = parse_sparql(clean, parser)
+    t_raw_stripped, had_label_service = remove_label_service(t_raw)
+    t_clean_stripped = (
+        remove_lang_filters(remove_rdfs_label_triples(t_clean))
+        if had_label_service
+        else t_clean
+    )
+    c_raw: set[str] = set()
+    c_clean: set[str] = set()
+    collect_present_nodes(t_raw_stripped, c_raw)
+    collect_present_nodes(t_clean_stripped, c_clean)
+    return _jaccard(c_raw & SPARQL_CONSTRUCTS, c_clean & SPARQL_CONSTRUCTS)
+
+
+class TestConstructJaccard:
+    def test_identical_query_structure(self, parser):
+        # Both have {SELECT} → Jaccard = 1/1 = 1.0
+        q1 = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }"
+        q2 = "SELECT ?y WHERE { ?y wdt:P31 wd:Q42 }"
+        assert _construct_jaccard(q1, q2, parser) == 1.0
+
+    def test_optional_added_reduces_jaccard(self, parser):
+        # raw has {SELECT}, clean has {SELECT, OPTIONAL}
+        # intersection=1, union=2 → 1/2
+        raw = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }"
+        clean = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 OPTIONAL { ?x wdt:P18 ?img } }"
+        assert _construct_jaccard(raw, clean, parser) == pytest.approx(1 / 2)
+
+    def test_partial_construct_overlap(self, parser):
+        # raw has {SELECT, FILTER}, clean has {SELECT, FILTER, OPTIONAL}
+        # intersection=2, union=3 → 2/3
+        raw = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 FILTER(?x != wd:Q1) }"
+        clean = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 OPTIONAL { ?x wdt:P18 ?img } FILTER(?x != wd:Q1) }"
+        assert _construct_jaccard(raw, clean, parser) == pytest.approx(2 / 3)
+
+    def test_ask_vs_select(self, parser):
+        # raw has {SELECT}, clean has {ASK} → intersection=0, union=2 → 0/2 = 0.0
+        raw = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 }"
+        clean = "ASK { ?x wdt:P31 wd:Q5 }"
+        assert _construct_jaccard(raw, clean, parser) == 0.0
+
+
+class TestRemoveLangFilters:
+    def test_langmatches_filter_stripped(self, parser):
+        q = "SELECT ?x ?label WHERE { ?x wdt:P31 wd:Q5 . FILTER(LANGMATCHES(LANG(?label), \"en\")) }"
+        tree = parse_sparql(q, parser)
+        stripped = remove_lang_filters(tree)
+        present: set[str] = set()
+        collect_present_nodes(stripped, present)
+        assert "FILTER" not in present
+        assert "LANG" not in present
+        assert "LANGMATCHES" not in present
+        # regular triple pattern still present
+        assert "SELECT" in present
+
+    def test_lang_eq_filter_stripped(self, parser):
+        q = "SELECT ?x ?label WHERE { ?x wdt:P31 wd:Q5 . FILTER(LANG(?label) = \"en\") }"
+        tree = parse_sparql(q, parser)
+        stripped = remove_lang_filters(tree)
+        present: set[str] = set()
+        collect_present_nodes(stripped, present)
+        assert "FILTER" not in present
+        assert "LANG" not in present
+
+    def test_non_lang_filter_kept(self, parser):
+        q = "SELECT ?x WHERE { ?x wdt:P31 wd:Q5 FILTER(?x != wd:Q1) }"
+        tree = parse_sparql(q, parser)
+        stripped = remove_lang_filters(tree)
+        present: set[str] = set()
+        collect_present_nodes(stripped, present)
+        assert "FILTER" in present
+
+    def test_mixed_filters_only_lang_stripped(self, parser):
+        # One lang filter + one value filter: only lang filter removed
+        q = (
+            "SELECT ?x ?label WHERE { "
+            "?x wdt:P31 wd:Q5 "
+            "FILTER(LANGMATCHES(LANG(?label), \"en\")) "
+            "FILTER(?x != wd:Q1) }"
+        )
+        tree = parse_sparql(q, parser)
+        stripped = remove_lang_filters(tree)
+        present: set[str] = set()
+        collect_present_nodes(stripped, present)
+        assert "FILTER" in present  # value filter remains
+        assert "LANGMATCHES" not in present
+
+    def test_service_stripped_matches_lang_filter_stripped(self, parser):
+        # raw has SERVICE wikibase:label, clean has FILTER(LANGMATCHES(LANG(...)))
+        # After stripping both, construct Jaccard should be 1.0
+        raw = (
+            "SELECT ?x ?xLabel WHERE { "
+            "?x wdt:P31 wd:Q5 . "
+            "SERVICE wikibase:label { bd:serviceParam wikibase:language \"en\" } }"
+        )
+        clean = (
+            "SELECT ?x ?label WHERE { "
+            "?x wdt:P31 wd:Q5 . "
+            "FILTER(LANGMATCHES(LANG(?label), \"en\")) }"
+        )
+        assert _construct_jaccard(raw, clean, parser) == 1.0

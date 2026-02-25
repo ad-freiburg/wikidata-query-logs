@@ -1,8 +1,10 @@
+import argparse
 import json
 import sys
 from collections import Counter
 
 from tqdm import tqdm
+from universal_ml_utils.io import dump_jsonl
 
 from utils import load_sparql_parser, parse_sparql
 
@@ -564,8 +566,303 @@ def count_node_occurrences(tree: dict | list, node_name: str) -> int:
     return count
 
 
+# ── WDQL comparison helpers ────────────────────────────────────────────────────
+
+
+def _find_node(tree: dict | list, name: str) -> dict | None:
+    """Find first node with given name in parse tree (DFS)."""
+    if isinstance(tree, dict):
+        if tree.get("name") == name:
+            return tree
+        for child in tree.get("children", []):
+            result = _find_node(child, name)
+            if result is not None:
+                return result
+    elif isinstance(tree, list):
+        for item in tree:
+            result = _find_node(item, name)
+            if result is not None:
+                return result
+    return None
+
+
+def _find_all_nodes(
+    tree: dict | list,
+    name: str,
+    skip_names: set[str] | None = None,
+) -> list[dict]:
+    """Find all nodes with given name; don't descend into nodes whose name is in skip_names."""
+    results: list[dict] = []
+    _skip = skip_names or set()
+
+    def walk(node: dict | list) -> None:
+        if isinstance(node, dict):
+            node_name = node.get("name")
+            if node_name in _skip:
+                return
+            if node_name == name:
+                results.append(node)
+            for child in node.get("children", []):
+                walk(child)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(tree)
+    return results
+
+
+def _copy_node(node: dict) -> dict:
+    """Copy name and value of a tree node (without children)."""
+    new: dict = {}
+    if "name" in node:
+        new["name"] = node["name"]
+    if "value" in node:
+        new["value"] = node["value"]
+    return new
+
+
+def _is_wikibase_label_service(service_node: dict) -> bool:
+    """Return True if a ServiceGraphPattern is the wikibase:label service."""
+    children = service_node.get("children", [])
+    # Grammar: SERVICE [SilentOptional] VarOrIri GroupGraphPattern
+    # With skip_empty=True, SilentOptional may be absent, so find VarOrIri by name.
+    var_or_iri = next(
+        (c for c in children if isinstance(c, dict) and c.get("name") == "VarOrIri"),
+        None,
+    )
+    if var_or_iri is None:
+        return False
+    iri = _find_node(var_or_iri, "IRIREF")
+    if iri is not None and iri.get("value") == "<http://wikiba.se/ontology#label>":
+        return True
+    pname = _find_node(var_or_iri, "PNAME_LN")
+    if pname is not None and pname.get("value") == "wikibase:label":
+        return True
+    return False
+
+
+def remove_label_service(tree: dict | list) -> tuple[dict | list, bool]:
+    """Return (new_tree, stripped) where SERVICE wikibase:label clauses are removed
+    and stripped=True if at least one was found.
+
+    Mirrors grasp.tasks.wikidata_query_logs.remove_service().
+    """
+    stripped = False
+
+    def _remove(node: dict | list) -> dict | list:
+        nonlocal stripped
+        if isinstance(node, dict):
+            if (
+                node.get("name") == "ServiceGraphPattern"
+                and _is_wikibase_label_service(node)
+            ):
+                stripped = True
+                return {"name": "ServiceGraphPattern"}  # empty leaf
+            new_node = _copy_node(node)
+            if "children" in node:
+                new_node["children"] = [_remove(c) for c in node["children"]]
+            return new_node
+        elif isinstance(node, list):
+            return [_remove(item) for item in node]
+        return node
+
+    result = _remove(tree)
+    return result, stripped
+
+
+def _triple_has_only_rdfs_label(triple_node: dict) -> bool:
+    """Return True if a TriplesSameSubjectPath has only rdfs:label as its predicate."""
+    prop_list = _find_node(triple_node, "PropertyListPathNotEmpty")
+    if prop_list is None:
+        return False
+    # VerbPathObjectListOptional with children means there are additional predicates (after ';')
+    for child in prop_list.get("children", []):
+        if (
+            isinstance(child, dict)
+            and child.get("name") == "VerbPathObjectListOptional"
+            and child.get("children")
+        ):
+            return False
+    for node in _find_all_nodes(prop_list, "IRIREF"):
+        if node.get("value") == "<http://www.w3.org/2000/01/rdf-schema#label>":
+            return True
+    for node in _find_all_nodes(prop_list, "PNAME_LN"):
+        if node.get("value") == "rdfs:label":
+            return True
+    return False
+
+
+def remove_rdfs_label_triples(tree: dict | list) -> dict | list:
+    """Return a new tree with TriplesSameSubjectPath nodes that use only
+    rdfs:label as their predicate removed."""
+    if isinstance(tree, dict):
+        if tree.get("name") == "TriplesSameSubjectPath" and _triple_has_only_rdfs_label(
+            tree
+        ):
+            return {"name": "TriplesSameSubjectPath"}  # empty leaf
+        new_node = _copy_node(tree)
+        if "children" in tree:
+            new_node["children"] = [
+                remove_rdfs_label_triples(c) for c in tree["children"]
+            ]
+        return new_node
+    elif isinstance(tree, list):
+        return [remove_rdfs_label_triples(item) for item in tree]
+    return tree
+
+
+def _filter_has_only_lang(filter_node: dict) -> bool:
+    """Return True if a Filter node's BuiltInCalls are exclusively LANG or LANGMATCHES."""
+    builtin_calls = _find_all_nodes(filter_node, "BuiltInCall")
+    if not builtin_calls:
+        return False
+    lang_names = {"LANG", "LANGMATCHES"}
+    for call in builtin_calls:
+        children = call.get("children", [])
+        if not children or not isinstance(children[0], dict):
+            return False
+        if children[0].get("name") not in lang_names:
+            return False
+    return True
+
+
+def remove_lang_filters(tree: dict | list) -> dict | list:
+    """Return a new tree with Filter nodes whose constraints are exclusively
+    LANG/LANGMATCHES removed. Mirrors the clean-side replacement of
+    SERVICE wikibase:label with FILTER(LANGMATCHES(LANG(?x), ...))."""
+    if isinstance(tree, dict):
+        if tree.get("name") == "Filter" and _filter_has_only_lang(tree):
+            return {"name": "Filter"}  # empty leaf
+        new_node = _copy_node(tree)
+        if "children" in tree:
+            new_node["children"] = [remove_lang_filters(c) for c in tree["children"]]
+        return new_node
+    elif isinstance(tree, list):
+        return [remove_lang_filters(item) for item in tree]
+    return tree
+
+
+def _get_where_body(tree: dict | list) -> dict | None:
+    """Return the top-level GroupGraphPattern (the WHERE body), or None."""
+    where = _find_node(tree, "WhereClause")
+    if where is None:
+        return None
+    return _find_node(where, "GroupGraphPattern")
+
+
+def _normalize_for_comparison(
+    tree: dict | list,
+    normalize_literals: bool = False,
+    prefix_map: dict[str, str] | None = None,
+) -> dict | list:
+    """Normalize a tree for cross-query comparison:
+    - Variables → generic placeholder ?_
+    - PNAME_LN → expanded full IRI using prefix_map when provided
+    - Optionally collapse all literals to a generic placeholder
+    """
+    if isinstance(tree, dict):
+        name = tree.get("name")
+        value = tree.get("value")
+        if name in ("VAR1", "VAR2"):
+            return {"name": name, "value": "?_"}
+        if normalize_literals and name in (
+            STRING_LITERAL_NODES | NUMERIC_LITERAL_NODES
+        ):
+            return {"name": name, "value": '"_"'}
+        if name == "PNAME_LN" and value and prefix_map:
+            colon = value.find(":")
+            if colon != -1:
+                base = prefix_map.get(value[: colon + 1])
+                if base:
+                    return {"name": "IRIREF", "value": f"<{base}{value[colon + 1 :]}>"}
+        new_node = _copy_node(tree)
+        if "children" in tree:
+            new_node["children"] = [
+                _normalize_for_comparison(c, normalize_literals, prefix_map)
+                for c in tree["children"]
+            ]
+        return new_node
+    elif isinstance(tree, list):
+        return [
+            _normalize_for_comparison(item, normalize_literals, prefix_map)
+            for item in tree
+        ]
+    return tree
+
+
+def _extract_triples(
+    body: dict | list,
+    normalize_literals: bool = False,
+    prefix_map: dict[str, str] | None = None,
+) -> set[str]:
+    """Extract normalized triple-pattern strings from a WHERE body."""
+    normalized = _normalize_for_comparison(body, normalize_literals, prefix_map)
+    triples: set[str] = set()
+    for node in _find_all_nodes(normalized, "TriplesSameSubjectPath"):
+        s = tree_to_sparql(node).strip()
+        if s:
+            triples.add(s)
+    return triples
+
+
+def _extract_iris(
+    body: dict | list,
+    prefix_map: dict[str, str] | None = None,
+) -> set[str]:
+    """Extract all full IRIs from a parse tree as <...> strings.
+    PNAME_LN nodes are expanded to full IRIs when prefix_map is provided.
+    """
+    iris: set[str] = set()
+
+    def walk(node: dict | list) -> None:
+        if isinstance(node, dict):
+            name = node.get("name")
+            value = node.get("value")
+            if name == "IRIREF" and value:
+                iris.add(value)
+            elif name == "PNAME_LN" and value and prefix_map:
+                colon = value.find(":")
+                if colon != -1:
+                    base = prefix_map.get(value[: colon + 1])
+                    if base:
+                        iris.add(f"<{base}{value[colon + 1 :]}>")
+            for child in node.get("children", []):
+                walk(child)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(body)
+    return iris
+
+
+def _jaccard(a: set, b: set) -> float:
+    """Jaccard similarity: |a ∩ b| / |a ∪ b|. Returns 1.0 if both sets are empty."""
+    if not a and not b:
+        return 1.0
+    return len(a & b) / len(a | b)
+
+
+def _print_jaccard_dist(scores: list[float], label: str, n_total: int) -> None:
+    """Print mean, median, and key percentages for a list of Jaccard scores."""
+    n = len(scores)
+    if n == 0:
+        return
+    mean_j = sum(scores) / n
+    median_j = sorted(scores)[n // 2]
+    perfect = sum(1 for s in scores if s == 1.0)
+    zero = sum(1 for s in scores if s == 0.0)
+    print(f"  {label}:")
+    print(f"    Mean: {mean_j:.3f}  Median: {median_j:.3f}")
+    print(
+        f"    Perfect match (1.0): {perfect:,} ({perfect / n_total * 100:.1f}%)"
+        f"  |  No overlap (0.0): {zero:,} ({zero / n_total * 100:.1f}%)"
+    )
+
+
 # Constructs we're interested in tracking (terminals from sparql.l and rules from sparql.y)
-CONSTRUCTS_OF_INTEREST = [
+KEYWORD_CONSTRUCTS = [
     # Query types (terminals)
     ("SELECT", "SELECT query"),
     ("CONSTRUCT", "CONSTRUCT query"),
@@ -603,6 +900,74 @@ CONSTRUCTS_OF_INTEREST = [
     ("SubSelect", "Subquery"),
 ]
 
+FUNCTION_CONSTRUCTS = {
+    # String functions
+    "STR",
+    "LANG",
+    "LANGMATCHES",
+    "DATATYPE",
+    "CONCAT",
+    "STRLEN",
+    "UCASE",
+    "LCASE",
+    "ENCODE_FOR_URI",
+    "CONTAINS",
+    "STRSTARTS",
+    "STRENDS",
+    "STRBEFORE",
+    "STRAFTER",
+    "SUBSTR",
+    "REPLACE",
+    "STRLANG",
+    "STRDT",
+    # Numeric functions
+    "ABS",
+    "CEIL",
+    "FLOOR",
+    "ROUND",
+    "RAND",
+    # Date/Time functions
+    "YEAR",
+    "MONTH",
+    "DAY",
+    "HOURS",
+    "MINUTES",
+    "SECONDS",
+    "TIMEZONE",
+    "TZ",
+    "NOW",
+    # Hash functions
+    "MD5",
+    "SHA1",
+    "SHA256",
+    "SHA384",
+    "SHA512",
+    # Node functions
+    "IRI",
+    "URI",
+    "BNODE",
+    "UUID",
+    "STRUUID",
+    # Type checking functions
+    "BOUND",
+    "SAMETERM",
+    "ISIRI",
+    "ISURI",
+    "ISBLANK",
+    "ISLITERAL",
+    "ISNUMERIC",
+    # Conditional functions
+    "COALESCE",
+    "IF",
+    # Pattern matching
+    "REGEX",
+    # Variable binding (treated as function for this metric)
+    "BIND",
+}
+
+# All tracked constructs for construct Jaccard comparison
+SPARQL_CONSTRUCTS = {node for node, _ in KEYWORD_CONSTRUCTS} | FUNCTION_CONSTRUCTS
+
 # Basic features: triple patterns, FILTER, ORDER BY, LIMIT, OFFSET, DISTINCT, query type
 BASIC_CONSTRUCTS = {
     "FILTER",
@@ -627,12 +992,26 @@ def is_advanced_query(tree: dict | list) -> bool:
     present: set[str] = set()
     collect_present_nodes(tree, present)
 
-    tracked_constructs = {node for node, _ in CONSTRUCTS_OF_INTEREST}
+    tracked_constructs = {node for node, _ in KEYWORD_CONSTRUCTS}
     advanced_in_query = (present & tracked_constructs) - BASIC_CONSTRUCTS
     return len(advanced_in_query) > 0
 
 
 def main() -> None:
+    arg_parser = argparse.ArgumentParser(description="SPARQL Query Statistics")
+    arg_parser.add_argument(
+        "--wdql",
+        type=str,
+        metavar="FILE",
+        help=(
+            "Enable WDQL comparison mode: read JSON records with 'sparql' and "
+            "'info.raw_sparql' fields and compute similarity metrics between them. "
+            "Saves all compared samples with per-sample Jaccard scores as a JSONL file."
+        ),
+    )
+
+    args = arg_parser.parse_args()
+
     parser = load_sparql_parser()
 
     # Statistics aggregators
@@ -654,7 +1033,15 @@ def main() -> None:
     queries_with_paths = 0
 
     # Track queries using any aggregate function
-    aggregate_constructs = {"COUNT", "SUM", "MIN", "MAX", "AVG", "SAMPLE", "GROUP_CONCAT"}
+    aggregate_constructs = {
+        "COUNT",
+        "SUM",
+        "MIN",
+        "MAX",
+        "AVG",
+        "SAMPLE",
+        "GROUP_CONCAT",
+    }
     queries_with_aggregates = 0
 
     # Track queries using LIMIT or OFFSET (pagination)
@@ -662,29 +1049,7 @@ def main() -> None:
     queries_with_pagination = 0
 
     # Track queries using any non-aggregate function (including BIND)
-    function_constructs = {
-        # String functions
-        "STR", "LANG", "LANGMATCHES", "DATATYPE", "CONCAT", "STRLEN",
-        "UCASE", "LCASE", "ENCODE_FOR_URI", "CONTAINS", "STRSTARTS", "STRENDS",
-        "STRBEFORE", "STRAFTER", "SUBSTR", "REPLACE", "STRLANG", "STRDT",
-        # Numeric functions
-        "ABS", "CEIL", "FLOOR", "ROUND", "RAND",
-        # Date/Time functions
-        "YEAR", "MONTH", "DAY", "HOURS", "MINUTES", "SECONDS",
-        "TIMEZONE", "TZ", "NOW",
-        # Hash functions
-        "MD5", "SHA1", "SHA256", "SHA384", "SHA512",
-        # Node functions
-        "IRI", "URI", "BNODE", "UUID", "STRUUID",
-        # Type checking functions
-        "BOUND", "SAMETERM", "ISIRI", "ISURI", "ISBLANK", "ISLITERAL", "ISNUMERIC",
-        # Conditional functions
-        "COALESCE", "IF",
-        # Pattern matching
-        "REGEX",
-        # Variable binding (treated as function for this metric)
-        "BIND",
-    }
+    function_constructs = FUNCTION_CONSTRUCTS
     queries_with_functions = 0
 
     # Track IRIs by prefix (including "other:" for unknown Wikidata prefixes)
@@ -708,22 +1073,50 @@ def main() -> None:
     language_counter: Counter[str] = Counter()  # How many queries use each language
     queries_with_language: int = 0
 
+    # WDQL comparison accumulators (only populated when --wdql is set)
+    iri_jaccards: list[float] = []
+    construct_jaccards: list[float] = []
+    wdql_records: list[dict] = []
+
     for line in tqdm(sys.stdin, desc="Processing queries", unit=" queries"):
         line = line.strip()
         if not line:
             continue
 
         try:
-            query = json.loads(line)
+            data = json.loads(line)
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}", file=sys.stderr)
+            json_errors += 1
+            continue
+
+        # Extract query string (and optionally clean SPARQL for --wdql comparison)
+        clean_sparql_str: str | None = None
+        if isinstance(data, str):
+            if args.wdql is not None:
+                raise ValueError("--wdql requires JSON objects, got a plain string")
+            query_str = data
+        elif isinstance(data, dict):
+            if args.wdql is not None:
+                info = data.get("info") or {}
+                raw = info.get("raw_sparql")
+                clean = data.get("sparql") or ""
+                query_str = raw if raw else clean
+                clean_sparql_str = clean if raw else None
+            else:
+                query_str = data.get("sparql") or ""
+        else:
+            json_errors += 1
+            continue
+
+        if not query_str:
             json_errors += 1
             continue
 
         total_queries += 1
 
         try:
-            tree = parse_sparql(query, parser)
+            tree = parse_sparql(query_str, parser)
             present: set[str] = set()
             collect_present_nodes(tree, present)
 
@@ -731,7 +1124,7 @@ def main() -> None:
                 construct_presence[node] += 1
 
             # Check for advanced constructs (any tracked construct beyond basic features)
-            tracked_constructs = {node for node, _ in CONSTRUCTS_OF_INTEREST}
+            tracked_constructs = {node for node, _ in KEYWORD_CONSTRUCTS}
             advanced_in_query = (present & tracked_constructs) - BASIC_CONSTRUCTS
             if advanced_in_query:
                 queries_with_advanced += 1
@@ -782,6 +1175,66 @@ def main() -> None:
             normalized_sparql_norm_props = tree_to_sparql(normalized_norm_props)
             unique_patterns_norm_props.add(normalized_sparql_norm_props)
 
+            # WDQL comparison metrics
+            if args.wdql is not None and clean_sparql_str:
+                try:
+                    clean_tree = parse_sparql(clean_sparql_str, parser)
+                    raw_body = _get_where_body(tree)
+                    clean_body = _get_where_body(clean_tree)
+                    if raw_body is not None and clean_body is not None:
+                        # Strip label service from raw; conditionally strip
+                        # rdfs:label triples and lang filters from clean.
+                        raw_stripped, had_label_service = remove_label_service(raw_body)
+                        clean_stripped = (
+                            remove_rdfs_label_triples(clean_body)
+                            if had_label_service
+                            else clean_body
+                        )
+
+                        clean_prefix_map = extract_prefix_declarations(clean_tree)
+                        # IRI Jaccard
+                        raw_iris = _extract_iris(raw_stripped)
+                        clean_iris = _extract_iris(clean_stripped, prefix_map=clean_prefix_map)
+                        j_iri = _jaccard(raw_iris, clean_iris)
+                        iri_jaccards.append(j_iri)
+                        # Construct Jaccard (restricted to SPARQL_CONSTRUCTS)
+                        # Strip label service from raw tree; conditionally strip
+                        # rdfs:label triples and lang filters from clean tree.
+                        raw_tree_stripped, _ = remove_label_service(tree)
+                        clean_tree_stripped = (
+                            remove_lang_filters(remove_rdfs_label_triples(clean_tree))
+                            if had_label_service
+                            else clean_tree
+                        )
+                        raw_all: set[str] = set()
+                        clean_all: set[str] = set()
+                        collect_present_nodes(raw_tree_stripped, raw_all)
+                        collect_present_nodes(clean_tree_stripped, clean_all)
+                        raw_constructs = raw_all & SPARQL_CONSTRUCTS
+                        clean_constructs = clean_all & SPARQL_CONSTRUCTS
+                        j_construct = _jaccard(raw_constructs, clean_constructs)
+                        construct_jaccards.append(j_construct)
+                        wdql_records.append(
+                            {
+                                "sparql": clean_sparql_str,
+                                "raw_sparql": query_str,
+                                "iris": {
+                                    "jaccard": j_iri,
+                                    "common": sorted(raw_iris & clean_iris),
+                                    "raw_sparql": sorted(raw_iris - clean_iris),
+                                    "sparql": sorted(clean_iris - raw_iris),
+                                },
+                                "constructs": {
+                                    "jaccard": j_construct,
+                                    "common": sorted(raw_constructs & clean_constructs),
+                                    "raw_sparql": sorted(raw_constructs - clean_constructs),
+                                    "sparql": sorted(clean_constructs - raw_constructs),
+                                },
+                            }
+                        )
+                except Exception:
+                    pass  # silently skip unparseable clean SPARQL
+
         except Exception as e:
             print(f"SPARQL parse error: {e}", file=sys.stderr)
             sparql_parse_errors += 1
@@ -829,7 +1282,7 @@ def main() -> None:
         print("Construct Presence (queries containing at least one):")
         print(f"{'-' * 60}")
 
-        for node_name, display_name in CONSTRUCTS_OF_INTEREST:
+        for node_name, display_name in KEYWORD_CONSTRUCTS:
             count = construct_presence.get(node_name, 0)
             pct = count / successfully_parsed * 100
             print(f"  {display_name}: {count} ({pct:.1f}%)")
@@ -906,6 +1359,24 @@ def main() -> None:
             for lang, count in language_counter.most_common():
                 pct = count / successfully_parsed * 100
                 print(f"    {lang}: {count:,} ({pct:.1f}%)")
+
+    # WDQL comparison stats
+    if args.wdql is not None and iri_jaccards:
+        n = len(iri_jaccards)
+        print(f"\n{'=' * 60}")
+        print("WDQL Comparison Statistics (info.raw_sparql vs sparql)")
+        print(f"{'=' * 60}")
+        print(
+            f"\nPairs compared: {n:,}"
+            f" (label service stripped from raw, rdfs:label triples stripped from clean)"
+        )
+        print(f"\n{'-' * 60}")
+        _print_jaccard_dist(iri_jaccards, "IRI Jaccard", n)
+        print(f"\n{'-' * 60}")
+        _print_jaccard_dist(construct_jaccards, "Construct Jaccard", n)
+
+        dump_jsonl(wdql_records, args.wdql)
+        print(f"\n  Saved {len(wdql_records):,} records → {args.wdql}")
 
 
 if __name__ == "__main__":
