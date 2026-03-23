@@ -1009,8 +1009,18 @@ def main() -> None:
             "Saves all compared samples with per-sample Jaccard scores as a JSONL file."
         ),
     )
+    arg_parser.add_argument(
+        "--wdql-use-raw",
+        action="store_true",
+        help=(
+            "Compute statistics on 'info.raw_sparql' instead of 'sparql'. "
+            "Mutually exclusive with --wdql."
+        ),
+    )
 
     args = arg_parser.parse_args()
+    if args.wdql_use_raw and args.wdql:
+        arg_parser.error("--wdql-use-raw and --wdql are mutually exclusive")
 
     parser = load_sparql_parser()
 
@@ -1093,8 +1103,10 @@ def main() -> None:
         # Extract query string (and optionally raw SPARQL for --wdql comparison)
         raw_sparql_str: str | None = None
         if isinstance(data, str):
-            if args.wdql is not None:
-                raise ValueError("--wdql requires JSON objects, got a plain string")
+            if args.wdql is not None or args.wdql_use_raw:
+                raise ValueError(
+                    "--wdql/--wdql-use-raw require JSON objects, got a plain string"
+                )
             query_str = data
         elif isinstance(data, dict):
             if args.wdql is not None:
@@ -1103,6 +1115,9 @@ def main() -> None:
                 clean = data.get("sparql") or ""
                 query_str = clean if clean else raw
                 raw_sparql_str = raw if clean else None
+            elif args.wdql_use_raw:
+                info = data.get("info") or {}
+                query_str = info.get("raw_sparql") or ""
             else:
                 query_str = data.get("sparql") or ""
         else:
