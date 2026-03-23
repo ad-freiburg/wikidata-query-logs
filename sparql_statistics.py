@@ -3,6 +3,7 @@ import json
 import sys
 from collections import Counter
 
+import langcodes
 from tqdm import tqdm
 from universal_ml_utils.io import dump_jsonl
 
@@ -653,9 +654,8 @@ def remove_label_service(tree: dict | list) -> tuple[dict | list, bool]:
     def _remove(node: dict | list) -> dict | list:
         nonlocal stripped
         if isinstance(node, dict):
-            if (
-                node.get("name") == "ServiceGraphPattern"
-                and _is_wikibase_label_service(node)
+            if node.get("name") == "ServiceGraphPattern" and _is_wikibase_label_service(
+                node
             ):
                 stripped = True
                 return {"name": "ServiceGraphPattern"}  # empty leaf
@@ -1090,8 +1090,8 @@ def main() -> None:
             json_errors += 1
             continue
 
-        # Extract query string (and optionally clean SPARQL for --wdql comparison)
-        clean_sparql_str: str | None = None
+        # Extract query string (and optionally raw SPARQL for --wdql comparison)
+        raw_sparql_str: str | None = None
         if isinstance(data, str):
             if args.wdql is not None:
                 raise ValueError("--wdql requires JSON objects, got a plain string")
@@ -1101,8 +1101,8 @@ def main() -> None:
                 info = data.get("info") or {}
                 raw = info.get("raw_sparql")
                 clean = data.get("sparql") or ""
-                query_str = raw if raw else clean
-                clean_sparql_str = clean if raw else None
+                query_str = clean if clean else raw
+                raw_sparql_str = raw if clean else None
             else:
                 query_str = data.get("sparql") or ""
         else:
@@ -1176,11 +1176,11 @@ def main() -> None:
             unique_patterns_norm_props.add(normalized_sparql_norm_props)
 
             # WDQL comparison metrics
-            if args.wdql is not None and clean_sparql_str:
+            if args.wdql is not None and raw_sparql_str:
                 try:
-                    clean_tree = parse_sparql(clean_sparql_str, parser)
-                    raw_body = _get_where_body(tree)
-                    clean_body = _get_where_body(clean_tree)
+                    raw_tree = parse_sparql(raw_sparql_str, parser)
+                    raw_body = _get_where_body(raw_tree)
+                    clean_body = _get_where_body(tree)
                     if raw_body is not None and clean_body is not None:
                         # Strip label service from raw; conditionally strip
                         # rdfs:label triples and lang filters from clean.
@@ -1191,20 +1191,22 @@ def main() -> None:
                             else clean_body
                         )
 
-                        clean_prefix_map = extract_prefix_declarations(clean_tree)
+                        clean_prefix_map = extract_prefix_declarations(tree)
                         # IRI Jaccard
                         raw_iris = _extract_iris(raw_stripped)
-                        clean_iris = _extract_iris(clean_stripped, prefix_map=clean_prefix_map)
+                        clean_iris = _extract_iris(
+                            clean_stripped, prefix_map=clean_prefix_map
+                        )
                         j_iri = _jaccard(raw_iris, clean_iris)
                         iri_jaccards.append(j_iri)
                         # Construct Jaccard (restricted to SPARQL_CONSTRUCTS)
                         # Strip label service from raw tree; conditionally strip
                         # rdfs:label triples and lang filters from clean tree.
-                        raw_tree_stripped, _ = remove_label_service(tree)
+                        raw_tree_stripped, _ = remove_label_service(raw_tree)
                         clean_tree_stripped = (
-                            remove_lang_filters(remove_rdfs_label_triples(clean_tree))
+                            remove_lang_filters(remove_rdfs_label_triples(tree))
                             if had_label_service
-                            else clean_tree
+                            else tree
                         )
                         raw_all: set[str] = set()
                         clean_all: set[str] = set()
@@ -1216,8 +1218,8 @@ def main() -> None:
                         construct_jaccards.append(j_construct)
                         wdql_records.append(
                             {
-                                "sparql": clean_sparql_str,
-                                "raw_sparql": query_str,
+                                "sparql": query_str,
+                                "raw_sparql": raw_sparql_str,
                                 "iris": {
                                     "jaccard": j_iri,
                                     "common": sorted(raw_iris & clean_iris),
@@ -1227,7 +1229,9 @@ def main() -> None:
                                 "constructs": {
                                     "jaccard": j_construct,
                                     "common": sorted(raw_constructs & clean_constructs),
-                                    "raw_sparql": sorted(raw_constructs - clean_constructs),
+                                    "raw_sparql": sorted(
+                                        raw_constructs - clean_constructs
+                                    ),
                                     "sparql": sorted(clean_constructs - raw_constructs),
                                 },
                             }
@@ -1355,10 +1359,17 @@ def main() -> None:
         lang_pct = queries_with_language / successfully_parsed * 100
         print(f"  Queries using language: {queries_with_language:,} ({lang_pct:.1f}%)")
         if language_counter:
+            all_langs = set(language_counter.keys())
+            valid_langs = {l for l in all_langs if langcodes.tag_is_valid(l)}
+            print(
+                f"  Distinct languages: {len(valid_langs):,} valid"
+                f" ({len(all_langs):,} total incl. invalid tags)"
+            )
             print("  Language distribution (by number of queries):")
             for lang, count in language_counter.most_common():
+                valid_marker = "" if langcodes.tag_is_valid(lang) else " [invalid]"
                 pct = count / successfully_parsed * 100
-                print(f"    {lang}: {count:,} ({pct:.1f}%)")
+                print(f"    {lang}: {count:,} ({pct:.1f}%){valid_marker}")
 
     # WDQL comparison stats
     if args.wdql is not None and iri_jaccards:
