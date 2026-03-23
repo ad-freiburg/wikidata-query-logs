@@ -11,10 +11,11 @@ See the [paper](https://arxiv.org/pdf/2602.14594) for more details.
 # Overview
 
 The two most important files are:
+
 - [wdql.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
 - [wdql-one-per-cluster.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-one-per-cluster.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 
-Both archives contains three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
+Both archives contain three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
 Each line in these files is a JSON object with the following structure:
 
 ```jsonc
@@ -39,7 +40,7 @@ Each line in these files is a JSON object with the following structure:
 
 ## All Downloads
 
-All assets are available for download at https://wdql.cs.uni-freiburg.de/data:
+All assets are available for download at <https://wdql.cs.uni-freiburg.de/data>:
 
 - `organic-query-logs.tar.gz`: Raw Wikidata SPARQL query logs as TSV files
 - `organic.tar.gz`: Processed and deduplicated query logs in a single JSONL file
@@ -93,7 +94,6 @@ the corresponding steps in the pipeline below.
 mkdir -p data
 pip install -r requirements.txt
 ```
-
 
 ### 1. Prepare input from query logs
 
