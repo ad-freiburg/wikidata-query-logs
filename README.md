@@ -8,6 +8,10 @@ See this [web app](https://wdql.cs.uni-freiburg.de/) to explore the dataset.
 
 See the [paper](https://arxiv.org/pdf/2602.14594) for more details.
 
+## News
+
+- **2026-04-02**: WDQL has been accepted to [SIGIR 2026](https://sigir2026.org/)
+
 # Overview
 
 The two most important files are:
