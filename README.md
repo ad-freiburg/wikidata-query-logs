@@ -49,7 +49,7 @@ Each line in these files is a JSON object with the following structure:
 
 ## All Downloads
 
-All assets are available for download at <https://wdql.cs.uni-freiburg.de/data>:
+All assets are available for download at <https://wdql.cs.uni-freiburg.de/data/>:
 
 - `organic-query-logs.tar.gz`: Raw Wikidata SPARQL query logs as TSV files
 - `organic.tar.gz`: Processed and deduplicated query logs in a single JSONL file
