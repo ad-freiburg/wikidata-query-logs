@@ -26,7 +26,7 @@ Each line in these files is a JSON object with the following structure:
 {
   "id": "train_132930",
   "question": "Works by Victor Hugo with French title \"Les Misérables\"",
-  "sparql": "SELECT ?work WHERE { ?work wdt:P50 ?author . ?author rdfs:label \"Victor Hugo\"@fr . ?work wdt:P1476 \"Les Misérables\"@fr . }",
+  "sparql": "PREFIX wdt: <http://www.wikidata.org/prop/direct/> PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#> SELECT ?work WHERE { ?work wdt:P50 ?author . ?author rdfs:label \"Victor Hugo\"@fr . ?work wdt:P1476 \"Les Misérables\"@fr . }",
   "paraphrases": [
     "What works authored by Victor Hugo have the French title \"Les Misérables\"?",
     "List all works written by Victor Hugo that are titled \"Les Misérables\" in French."
@@ -41,6 +41,11 @@ Each line in these files is a JSON object with the following structure:
 > Note: If you want to use WDQL for something else than KGQA, you can just
 > concatenate all JSONL files after downloading and extracting `wdql.tar.gz` or
 > `wdql-one-per-cluster.tar.gz` to get a single file with all question-SPARQL pairs.
+
+> Note: Initially SPARQL queries were generated without PREFIX
+> declarations. Affected queries were fixed post-hoc with this
+> [fix_prefixes.py](https://github.com/ad-freiburg/grasp/blob/wikidata-query-logs/scripts/fix_prefixes.py)
+> script.
 
 ## All Downloads
 
