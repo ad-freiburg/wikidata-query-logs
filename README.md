@@ -10,14 +10,20 @@ See the [paper](https://arxiv.org/pdf/2602.14594) for more details.
 
 ## News
 
+- **2026-04-21**: Second WDQL release (`21-04-26`) with additional Qwen3.5 27B
+  generations on top of the original Qwen3-Next 80B A3B generations. The new
+  release grows WDQL from 200,186 to 335,450 samples (train/val/test
+  268,913 / 33,149 / 33,388) and WDQL one-per-cluster from 103,327 to 173,766.
 - **2026-04-02**: WDQL has been accepted to [SIGIR 2026](https://sigir2026.org/)
+- **2026-02-02**: Initial WDQL release (`02-02-26`) with 200,186 samples
+  generated from organic Wikidata query logs using Qwen3-Next 80B A3B.
 
 # Overview
 
 The two most important files are:
 
-- [wdql.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
-- [wdql-one-per-cluster.tar.gz](https://wdql.cs.uni-freiburg.de/data/wdql-one-per-cluster.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
+- [wdql.tar.gz](https://wdql.cs.uni-freiburg.de/data/latest/wdql.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- [wdql-one-per-cluster.tar.gz](https://wdql.cs.uni-freiburg.de/data/latest/wdql-one-per-cluster.tar.gz): WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 
 Both archives contain three JSONL files: `train.jsonl`, `val.jsonl`, and `test.jsonl`.
 Each line in these files is a JSON object with the following structure:
@@ -49,20 +55,26 @@ Each line in these files is a JSON object with the following structure:
 
 ## All Downloads
 
-All assets are available for download at <https://wdql.cs.uni-freiburg.de/data/>:
+All assets are available for download at <https://wdql.cs.uni-freiburg.de/data/>.
+
+Top-level (shared across releases):
 
 - `organic-query-logs.tar.gz`: Raw Wikidata SPARQL query logs as TSV files
 - `organic.tar.gz`: Processed and deduplicated query logs in a single JSONL file
-- `organic-qwen3-next-80b-a3b.tar.gz`: Generated question-SPARQL samples with GRASP
-- `organic-qwen3-next-80b-a3b-dataset.tar.gz`: Processed GRASP samples with question embeddings and clusters
-- `wdql.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
-- `wdql-one-per-cluster.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
 - `wikidata-benchmarks.tar.gz`: Other Wikidata benchmarks (for comparison)
+
+Per-release files live under a dated subdirectory (e.g. `21-04-26/`). The
+`latest/` symlink always points to the most recent release.
+
+- `latest/wdql.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
+- `latest/wdql-one-per-cluster.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
+- `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b.tar.gz`: Generated question-SPARQL samples with GRASP (Qwen3-Next 80B A3B + Qwen3.5 27B; the `02-02-26` release uses `organic-qwen3-next-80b-a3b.tar.gz` since it only includes the Qwen3-Next 80B A3B generations)
+- `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset.tar.gz`: Processed GRASP samples with question embeddings and clusters (same naming caveat as above)
 
 Download and extract these files into a subdirectory named `data/` to skip
 the corresponding steps in the pipeline below.
 
-## Dataset Creation Statistics
+## Dataset Creation Statistics (`02-02-26` release)
 
 | Stage | Number |
 |-------|--------|
@@ -200,4 +212,5 @@ streamlit run visualize_app.py
 ```
 
 > Note: To run the app, you need to complete step 4 above or download
-> and extract `organic-qwen3-next-80b-a3b-dataset.tar.gz` first.
+> and extract `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset.tar.gz`
+> first.
