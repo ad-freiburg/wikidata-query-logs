@@ -74,7 +74,45 @@ Per-release files live under a dated subdirectory (e.g. `21-04-26/`). The
 Download and extract these files into a subdirectory named `data/` to skip
 the corresponding steps in the pipeline below.
 
-## Dataset Creation Statistics (`02-02-26` release)
+## Dataset Creation Statistics
+
+<details>
+<summary><code>21-04-26</code> release</summary>
+
+| Stage | Number |
+|-------|--------|
+| **Data Collection** | |
+| &nbsp;&nbsp;&nbsp;&nbsp;Raw organic SPARQL logs | 3,530,955 |
+| &nbsp;&nbsp;&nbsp;&nbsp;After deduplication | 859,305 |
+| **SPARQL Fixing and Question Generation with GRASP** | |
+| &nbsp;&nbsp;&nbsp;&nbsp;Processed samples | 449,715 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;With questions (80.1%) | 360,314 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Without questions (19.9%) | 89,401 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model API failure | 6,873 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model output failure | 78,582 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Cancelled via `CAN` | 3,896 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model stuck in loop | 50 |
+| **Validation** | |
+| &nbsp;&nbsp;&nbsp;&nbsp;Valid (93.1%) | 335,450 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Invalid (6.9%) | 24,864 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPARQL parsing failed | 777 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPARQL execution failed | 5,875 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Empty SPARQL result | 18,212 |
+| **Clustering** | |
+| &nbsp;&nbsp;&nbsp;&nbsp;Clustered samples (valid) | 335,450 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Num. clusters | 173,766 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Max. cluster size | 165 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Avg. cluster size | 1.93 |
+| **KGQA Datasets** | |
+| &nbsp;&nbsp;&nbsp;&nbsp;WDQL (one-per-cluster) | 173,766 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 139,012 / 17,377 / 17,377 |
+| &nbsp;&nbsp;&nbsp;&nbsp;WDQL | 335,450 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 268,913 / 33,149 / 33,388 |
+
+</details>
+
+<details>
+<summary><code>02-02-26</code> release</summary>
 
 | Stage | Number |
 |-------|--------|
@@ -105,6 +143,8 @@ the corresponding steps in the pipeline below.
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 82,661 / 10,333 / 10,333 |
 | &nbsp;&nbsp;&nbsp;&nbsp;WDQL | 200,186 |
 | &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 159,815 / 20,485 / 19,886 |
+
+</details>
 
 ## Pipeline
 
