@@ -9,6 +9,21 @@ import streamlit as st
 from universal_ml_utils.io import load_json
 
 
+def strip_code_fences(text: str) -> str:
+    """Remove a surrounding markdown code fence from a text block."""
+    stripped = text.strip()
+
+    if stripped.startswith("```sparql"):
+        stripped = stripped.removeprefix("```sparql").lstrip("\n")
+    elif stripped.startswith("```"):
+        stripped = stripped.removeprefix("```").lstrip("\n")
+
+    if stripped.endswith("```"):
+        stripped = stripped.removesuffix("```").rstrip("\n")
+
+    return stripped.strip()
+
+
 def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
     """Parse formatted output into sections: questions, sparql, and rest."""
     if not formatted_text:
@@ -30,7 +45,7 @@ def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
         re.DOTALL,
     )
     if sparql_match:
-        sections["sparql"] = sparql_match.group(1).strip()
+        sections["sparql"] = strip_code_fences(sparql_match.group(1))
 
     # Extract rest (everything after SPARQL)
     rest_match = re.search(
