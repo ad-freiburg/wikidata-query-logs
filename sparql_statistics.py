@@ -968,7 +968,8 @@ FUNCTION_CONSTRUCTS = {
 # All tracked constructs for construct Jaccard comparison
 SPARQL_CONSTRUCTS = {node for node, _ in KEYWORD_CONSTRUCTS} | FUNCTION_CONSTRUCTS
 
-# Basic features: triple patterns, FILTER, ORDER BY, LIMIT, OFFSET, DISTINCT, query type
+# Basic features: triple patterns, FILTER, ORDER BY, LIMIT, OFFSET, DISTINCT, query type,
+# GROUP BY and its associated aggregate functions
 BASIC_CONSTRUCTS = {
     "FILTER",
     "ORDER",
@@ -979,6 +980,14 @@ BASIC_CONSTRUCTS = {
     "ASK",
     "CONSTRUCT",
     "DESCRIBE",
+    "GROUP",
+    "COUNT",
+    "SUM",
+    "MIN",
+    "MAX",
+    "AVG",
+    "SAMPLE",
+    "GROUP_CONCAT",
 }
 
 
