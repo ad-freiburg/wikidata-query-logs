@@ -44,28 +44,6 @@ def parse_formatted_sections(formatted_text: str) -> dict[str, str]:
     return sections
 
 
-@st.cache_data
-def load_data(
-    dataset_dir: str,
-) -> tuple[list[dict], list[int], list[list[float]], dict]:
-    """Load samples, cluster labels, UMAP coordinates, and statistics."""
-    dataset_path = Path(dataset_dir)
-
-    # Load samples
-    samples = load_json(dataset_path / "samples.json")
-
-    # Load cluster labels
-    labels = load_json(dataset_path / "clusters" / "cluster_labels.json")
-
-    # Load UMAP coordinates
-    coords = load_json(dataset_path / "clusters" / "umap_coords.json")
-
-    # Load cluster stats
-    stats = load_json(dataset_path / "clusters" / "cluster_stats.json")
-
-    return samples, labels, coords, stats  # type: ignore
-
-
 def compute_validity_stats(samples: list[dict]) -> dict:
     """Compute validity statistics from samples."""
     stats = {
@@ -98,6 +76,7 @@ def create_dataframe(
         zip(samples, labels, coords, strict=True)
     ):
         first_question = sample["questions"][0] if sample["questions"] else ""
+        sparql = sample.get("sparql", "")
 
         data.append(
             {
@@ -107,9 +86,7 @@ def create_dataframe(
                 "y": coord[1],
                 "first_question": first_question,
                 "num_questions": len(sample["questions"]),
-                "sparql": sample.get("sparql", "")[:100] + "..."
-                if sample.get("sparql", "")
-                else "",
+                "sparql": sparql[:100] + "..." if sparql else "",
                 "valid": sample.get("valid", False),
                 "validity_reason": sample.get("validity_reason", "unknown"),
                 "file": sample["origin"]["file"],
@@ -117,6 +94,28 @@ def create_dataframe(
         )
 
     return pd.DataFrame(data)
+
+
+@st.cache_data
+def load_data(
+    dataset_dir: str,
+) -> tuple[list[dict], list[int], list[list[float]], dict]:
+    """Load samples, cluster labels, UMAP coordinates, and statistics."""
+    dataset_path = Path(dataset_dir)
+
+    # Load samples
+    samples = load_json(dataset_path / "samples.json")
+
+    # Load cluster labels
+    labels = load_json(dataset_path / "clusters" / "cluster_labels.json")
+
+    # Load UMAP coordinates
+    coords = load_json(dataset_path / "clusters" / "umap_coords.json")
+
+    # Load cluster stats
+    stats = load_json(dataset_path / "clusters" / "cluster_stats.json")
+
+    return samples, labels, coords, stats  # type: ignore
 
 
 def parse_args() -> argparse.Namespace:
@@ -170,7 +169,7 @@ def main() -> None:
         f"{cluster} ({cluster_counts[cluster]} samples)"
         for cluster in cluster_options_sorted
     ]
-    st.sidebar.info("ℹ️ Cluster -1 indicates invalid samples (not used in clustering)")
+    st.sidebar.info("Cluster -1 indicates invalid samples (not used in clustering)")
     selected_clusters_with_counts = st.sidebar.multiselect(
         "Select Clusters",
         options=cluster_options_with_counts,
@@ -254,7 +253,7 @@ def main() -> None:
 
     # Capture click events
     selected_points = st.plotly_chart(
-        fig, use_container_width=True, on_select="rerun", key="scatter"
+        fig, width="stretch", on_select="rerun", key="scatter"
     )
 
     # Store clicked point index in session state
@@ -283,7 +282,7 @@ def main() -> None:
 
         # Get cluster sizes (excluding -1 for invalid)
         if "cluster_sizes" in cluster_stats:
-            sizes = {k: v for k, v in cluster_stats["cluster_sizes"].items() if k != -1}
+            sizes = {k: v for k, v in cluster_stats["cluster_sizes"].items() if k != "-1"}
             if sizes:
                 sorted_sizes = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
 
@@ -298,7 +297,7 @@ def main() -> None:
                 st.dataframe(
                     pd.DataFrame(largest_data),
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                 )
 
     with col2:
@@ -318,7 +317,7 @@ def main() -> None:
         fig_pie = px.pie(
             validity_df, values="Count", names="Status", title="Sample Validity"
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width="stretch")
 
     if validity_stats["invalid_reasons"]:
         st.subheader("Invalid Reasons")
@@ -328,7 +327,7 @@ def main() -> None:
                 for k, v in validity_stats["invalid_reasons"].items()
             ]
         ).sort_values("Count", ascending=False)
-        st.dataframe(invalid_df, use_container_width=True)
+        st.dataframe(invalid_df, width="stretch")
 
     # Sample details
     st.header("Sample Details")
@@ -338,7 +337,7 @@ def main() -> None:
         return
 
     # Random sample button
-    if st.button("🎲 Random Sample", use_container_width=False):
+    if st.button("🎲 Random Sample", width="content"):
         # Use filtered_df for random selection (all filtered data, not just subsampled)
         random_idx = random.choice(filtered_df.index.tolist())
         st.session_state["selected_index"] = random_idx
@@ -351,7 +350,7 @@ def main() -> None:
 
     # Display selected sample
     sample = samples[sample_index]
-    sample_row = df.iloc[sample_index]
+    sample_row = df.loc[sample_index]
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Sample ID", sample_index)
