@@ -125,7 +125,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-dir",
         type=str,
-        default="data/organic-qwen3-next-80b-a3b-dataset",
+        default="data/21-04-26/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset",
         help="Directory containing the dataset with samples and clusters",
     )
     return parser.parse_args()
@@ -282,7 +282,9 @@ def main() -> None:
 
         # Get cluster sizes (excluding -1 for invalid)
         if "cluster_sizes" in cluster_stats:
-            sizes = {k: v for k, v in cluster_stats["cluster_sizes"].items() if k != "-1"}
+            sizes = {
+                k: v for k, v in cluster_stats["cluster_sizes"].items() if k != "-1"
+            }
             if sizes:
                 sorted_sizes = sorted(sizes.items(), key=lambda x: x[1], reverse=True)
 
