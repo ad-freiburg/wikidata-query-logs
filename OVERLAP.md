@@ -28,6 +28,7 @@ For reference, the overlap within each benchmark's own train/test split.
 | qald10 | 394 | 0% | 6.1% | 33.8% |
 | lcquad2 | 6,028 | 2.5% | 67.2% | 99.9% |
 | simplequestions | 5,622 | 12.5% | 100% | 100% |
+| wdql-one-per-cluster (02-02-26) | 10,333 | 1.4% | 52.1% | 62.5% |
 
 ## Matching levels
 
