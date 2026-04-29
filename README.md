@@ -2,7 +2,7 @@
 
 A dataset of question-SPARQL-pairs built from
 [Wikidata Query Logs](https://iccl.inf.tu-dresden.de/web/Wikidata_SPARQL_Logs/en)
-from 2017 to 2018.
+from 2017 to 2018 using the [GRASP](https://github.com/ad-freiburg/grasp) S2Q agent.
 
 See this [web app](https://wdql.cs.uni-freiburg.de/) to explore the dataset.
 
@@ -167,6 +167,8 @@ python prepare_input.py data/*.tsv data/
 ```
 
 ### 2. Generate question-SPARQL pairs with GRASP
+
+> Uses the [`wikidata-query-logs` branch](https://github.com/ad-freiburg/grasp/tree/wikidata-query-logs) of GRASP.
 
 ```bash
 # Checkout wdql branch of GRASP
