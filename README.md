@@ -256,3 +256,18 @@ streamlit run visualize_app.py
 > Note: To run the app, you need to complete step 4 above or download
 > and extract `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset.tar.gz`
 > first.
+
+## Citation
+
+If you use the Wikidata Query Logs dataset, please cite our paper:
+
+```bibtex
+@article{DBLP:journals/corr/abs-2602-14594,
+  author       = {Sebastian Walter and
+                  Hannah Bast},
+  title        = {The Wikidata Query Logs Dataset},
+  journal      = {CoRR},
+  volume       = {abs/2602.14594},
+  year         = {2026}
+}
+```
