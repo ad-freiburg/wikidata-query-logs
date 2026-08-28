@@ -11,9 +11,17 @@ from utils import validate_sample
 
 GENERATION_REASON_LABELS = {
     "error_field_not_null (reason=api)": "Model API failure",
+    "error_field_not_null (reason=timeout)": "Model API timeout",
     "output_field_null": "Model output failure",
     "type_is_cancel": "Cancelled via `CAN`",
     "error_field_not_null (reason=loop)": "Model stuck in loop",
+}
+
+# Files that are not generation attempts, and so are not processed samples.
+NON_SAMPLE_REASON_LABELS = {
+    "not_a_sample (request failed)": "GRASP request failed",
+    "not_a_sample (truncated generation)": "Truncated generation",
+    "null_json": "Empty or unparsable file",
 }
 
 VALIDATION_REASON_LABELS = {
@@ -86,11 +94,12 @@ def compute_generation_stats(generation_dir: Path) -> dict[str, Any]:
     if not json_files:
         raise FileNotFoundError(f"No generation JSON files found in {generation_dir}")
 
-    processed = len(json_files)
+    files = len(json_files)
     with_questions = 0
     without_questions = 0
     generation_failures = {label: 0 for label in GENERATION_REASON_LABELS.values()}
     validation_invalid = {label: 0 for label in VALIDATION_REASON_LABELS.values()}
+    non_samples = {label: 0 for label in NON_SAMPLE_REASON_LABELS.values()}
 
     for json_file in tqdm(json_files, desc="Generation", unit="file"):
         data = load_json(json_file)
@@ -98,6 +107,11 @@ def compute_generation_stats(generation_dir: Path) -> dict[str, Any]:
         output = data.get("output") if data else None
         has_questions = bool(output and output.get("questions"))
         is_valid, reason = validate_sample(data)
+
+        label = NON_SAMPLE_REASON_LABELS.get(reason)
+        if label is not None:
+            non_samples[label] += 1
+            continue
 
         if has_questions:
             with_questions += 1
@@ -120,6 +134,7 @@ def compute_generation_stats(generation_dir: Path) -> dict[str, Any]:
             )
         generation_failures[label] += 1
 
+    processed = files - sum(non_samples.values())
     if with_questions + without_questions != processed:
         raise ValueError(
             "Generation counts do not add up: "
@@ -127,11 +142,13 @@ def compute_generation_stats(generation_dir: Path) -> dict[str, Any]:
         )
 
     return {
+        "files": files,
         "processed": processed,
         "with_questions": with_questions,
         "without_questions": without_questions,
         "generation_failures": generation_failures,
         "validation_invalid": validation_invalid,
+        "non_samples": non_samples,
     }
 
 
@@ -169,6 +186,18 @@ def render_table(stats: dict[str, Any]) -> str:
     invalid = with_questions - valid
     generation_failures = generation["generation_failures"]
     validation_invalid = generation["validation_invalid"]
+    non_samples = [
+        (label, count) for label, count in generation["non_samples"].items() if count
+    ]
+    # Only listed when there are any, since a clean run has none.
+    non_sample_rows: list[list[str]] = []
+    if non_samples:
+        skipped = sum(count for _, count in non_samples)
+        non_sample_rows.append(
+            [indent(f"Skipped {format_int(skipped)} non-sample files", level=2), ""]
+        )
+        for label, count in non_samples:
+            non_sample_rows.append([indent(label, level=3), format_int(count)])
     max_cluster_size = max(cluster_stats["cluster_sizes"].values())
     avg_cluster_size = cluster_stats["num_valid_samples"] / cluster_stats["n_clusters"]
 
@@ -178,6 +207,7 @@ def render_table(stats: dict[str, Any]) -> str:
         [indent("After deduplication"), format_int(deduplicated)],
         ["**SPARQL Fixing and Question Generation with GRASP**", ""],
         [indent("Processed samples"), format_int(processed)],
+        *non_sample_rows,
         [
             indent(
                 f"With questions ({format_pct(with_questions, processed)})", level=2
@@ -194,6 +224,10 @@ def render_table(stats: dict[str, Any]) -> str:
         [
             indent("Model API failure", level=3),
             format_int(generation_failures["Model API failure"]),
+        ],
+        [
+            indent("Model API timeout", level=3),
+            format_int(generation_failures["Model API timeout"]),
         ],
         [
             indent("Model output failure", level=3),

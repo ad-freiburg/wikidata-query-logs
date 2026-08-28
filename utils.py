@@ -16,16 +16,27 @@ def validate_sample(data: dict | None) -> tuple[bool, str]:
 
     Invalid reasons:
         - null_json: The JSON is null or empty
+        - not_a_sample (request failed): HTTP error body, the model never ran
+        - not_a_sample (truncated generation): an intermediate record, not an output
         - error_field_not_null: The error field is not null
         - output_field_null: The output field is missing or null
         - type_is_cancel: output.type equals "cancel"
         - no_questions: output.questions field is missing or empty
         - sparql_execution_failed: formatted result contains "SPARQL execution failed"
-        - empty_result: formatted result contains "Got 0 rows"
+        - empty_result: formatted result contains "Got no rows" or "Got 0 rows"
     """
     # Check if JSON is null or empty
     if data is None:
         return False, "null_json"
+
+    # A file can also hold an HTTP error body or an intermediate record, since /run
+    # returns the last record generate() yielded. Neither carries an "error" field,
+    # so both need excluding here or they count as model failures.
+    record_type = data.get("type")
+    if record_type is None:
+        return False, "not_a_sample (request failed)"
+    if record_type != "output":
+        return False, "not_a_sample (truncated generation)"
 
     # Check if error field is not null
     err = data.get("error")
@@ -54,8 +65,8 @@ def validate_sample(data: dict | None) -> tuple[bool, str]:
     if formatted and "Error executing SPARQL query over" in formatted:
         return False, "sparql_execution_failed (preprocessing)"
 
-    # Check if result is empty (Got 0 rows)
-    if formatted and "Got no rows" in formatted:
+    # Check if result is empty; runs up to Qwen3-Next-80B-A3B say "Got no rows"
+    if formatted and ("Got no rows" in formatted or "Got 0 rows" in formatted):
         return False, "empty_result"
 
     return True, "valid"
