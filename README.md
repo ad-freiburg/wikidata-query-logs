@@ -10,6 +10,13 @@ See the [paper](https://arxiv.org/pdf/2602.14594) for more details.
 
 ## News
 
+- **2026-09-03**: Third WDQL release (`03-09-26`) with additional Qwen3.5 397B,
+  Qwen3.6 27B and Qwen3.6 35B A3B generations on top of the previous Qwen3-Next
+  80B A3B and Qwen3.5 27B ones. The new release grows WDQL from 335,450 to
+  433,668 samples (train/val/test 346,645 / 43,181 / 43,842) and WDQL
+  one-per-cluster from 173,766 to 226,376. Note that clusters and splits are
+  recomputed from scratch for every release, so splits are not comparable across
+  releases.
 - **2026-04-21**: Second WDQL release (`21-04-26`) with additional Qwen3.5 27B
   generations on top of the original Qwen3-Next 80B A3B generations. The new
   release grows WDQL from 200,186 to 335,450 samples (train/val/test
@@ -68,13 +75,64 @@ Per-release files live under a dated subdirectory (e.g. `21-04-26/`). The
 
 - `latest/wdql.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, all samples per cluster)
 - `latest/wdql-one-per-cluster.tar.gz`: WDQL dataset for KGQA (train/val/test split by cluster, one sample per cluster)
-- `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b.tar.gz`: Generated question-SPARQL samples with GRASP (Qwen3-Next 80B A3B + Qwen3.5 27B; the `02-02-26` release uses `organic-qwen3-next-80b-a3b.tar.gz` since it only includes the Qwen3-Next 80B A3B generations)
-- `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset.tar.gz`: Processed GRASP samples with question embeddings and clusters (same naming caveat as above)
+- `latest/organic-generations.tar.gz`: Generated question-SPARQL samples with GRASP, one JSON file with the full agent trace per query log entry
+- `latest/organic-generations-dataset.tar.gz`: Processed GRASP samples with question embeddings and clusters
+
+> Note: Older releases name these two archives after the models they were
+> generated with, e.g. `organic-qwen3-next-80b-a3b-and-qwen35-27b.tar.gz` for
+> `21-04-26` and `organic-qwen3-next-80b-a3b.tar.gz` for `02-02-26`. Since
+> `03-09-26` combines the generations of five models, they are simply called
+> `organic-generations.tar.gz` and `organic-generations-dataset.tar.gz`; the
+> models of a release are listed in its news entry above.
 
 Download and extract these files into a subdirectory named `data/` to skip
 the corresponding steps in the pipeline below.
 
 ## Dataset Creation Statistics
+
+<details>
+<summary><code>03-09-26</code> release</summary>
+
+Combines the generations of five models: Qwen3-Next 80B A3B (397,879 files),
+Qwen3.5 27B (53,123), Qwen3.5 397B (52,402), Qwen3.6 27B (49,273) and
+Qwen3.6 35B A3B (52,184). Generations are named after the query log entry they
+belong to, so the numbers are the files that survived merging the five runs.
+
+| Stage | Number |
+|-------|--------|
+| **Data Collection** |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;Raw organic SPARQL logs | 3,530,955 |
+| &nbsp;&nbsp;&nbsp;&nbsp;After deduplication | 859,305 |
+| **SPARQL Fixing and Question Generation with GRASP** |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;Processed samples | 562,657 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Skipped 42,204 non-sample files |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GRASP request failed | 4,036 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Truncated generation | 38,168 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;With questions (83.9%) | 472,140 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Without questions (16.1%) | 90,517 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model API failure | 12,333 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model API timeout | 32,698 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model output failure | 39,689 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Cancelled via `CAN` | 5,571 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Model stuck in loop | 226 |
+| **Validation** |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;Valid (91.9%) | 433,668 |
+| &nbsp;&nbsp;&nbsp;&nbsp;Invalid (8.1%) | 38,472 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPARQL parsing failed | 1,006 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;SPARQL execution failed | 9,379 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Empty SPARQL result | 28,087 |
+| **Clustering** |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;Clustered samples (valid) | 433,668 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Num. clusters | 226,376 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Max. cluster size | 249 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Avg. cluster size | 1.92 |
+| **KGQA Datasets** |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;WDQL (one-per-cluster) | 226,376 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 181,100 / 22,638 / 22,638 |
+| &nbsp;&nbsp;&nbsp;&nbsp;WDQL | 433,668 |
+| &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Train / Val / Test | 346,645 / 43,181 / 43,842 |
+
+</details>
 
 <details>
 <summary><code>21-04-26</code> release</summary>
@@ -204,26 +262,39 @@ python scripts/run_wikidata_query_logs.py \
   http://localhost:12345/run # GRASP server URL
 ```
 
+A release can combine the generations of multiple models. Since generations are
+named after the query log entry they belong to, merging the runs into a single
+directory is enough; on a collision the run copied last wins, so copy them in
+order of increasing quality:
+
+```bash
+mkdir -p data/organic-generations
+for m in qwen36-35b-a3b qwen3-next-80b-a3b qwen35-27b qwen36-27b qwen35-397b; do
+  cp -a data/organic-$m/. data/organic-generations/
+done
+```
+
 ### 3. Generate dataset and embeddings
 
 ```bash
-python generate_dataset.py
+python generate_dataset.py --data-dir data/organic-generations \
+  --output-dir data/organic-generations-dataset
 ```
 
 ### 4. Build clusters from embeddings
 
 ```bash
-python build_clusters.py
+python build_clusters.py --dataset-dir data/organic-generations-dataset
 ```
 
 ### 5. Export KGQA dataset using clusters
 
 ```bash
 # WDQL uniq dataset (one sample per cluster)
-python export_kgqa_dataset.py
+python export_kgqa_dataset.py --dataset-dir data/organic-generations-dataset
 # WDQL all dataset (all samples per cluster)
-python export_kgqa_dataset.py --output-dir data/wdql \
-  --samples-per-cluster -1
+python export_kgqa_dataset.py --dataset-dir data/organic-generations-dataset \
+  --output-dir data/wdql --samples-per-cluster -1
 ```
 
 ## Statistics
@@ -254,8 +325,7 @@ streamlit run visualize_app.py
 ```
 
 > Note: To run the app, you need to complete step 4 above or download
-> and extract `latest/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset.tar.gz`
-> first.
+> and extract `latest/organic-generations-dataset.tar.gz` first.
 
 ## Citation
 

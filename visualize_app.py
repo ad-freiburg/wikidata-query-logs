@@ -140,7 +140,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-dir",
         type=str,
-        default="data/21-04-26/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset",
+        default="data/03-09-26/organic-generations-dataset",
         help="Directory containing the dataset with samples and clusters",
     )
     return parser.parse_args()
