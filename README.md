@@ -327,6 +327,19 @@ streamlit run visualize_app.py
 > Note: To run the app, you need to complete step 4 above or download
 > and extract `latest/organic-generations-dataset.tar.gz` first.
 
+Or run it with Docker (dependencies pinned in `constraints.txt`), mounting the
+directory that contains the `<release>/organic-generations-dataset` folders:
+
+```bash
+docker build -t wdql-visualize .
+docker run -d --name wdql-visualize --restart unless-stopped -p 8501:8501 \
+  -v $(pwd)/data:/app/data:ro wdql-visualize
+# another release than the default 03-09-26:
+#   docker run ... wdql-visualize -- --dataset-dir data/21-04-26/organic-qwen3-next-80b-a3b-and-qwen35-27b-dataset
+```
+
+The app is then available at http://localhost:8501.
+
 ## Citation
 
 If you use the Wikidata Query Logs dataset, please cite our paper:
