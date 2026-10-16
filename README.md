@@ -345,12 +345,13 @@ The app is then available at http://localhost:8501.
 If you use the Wikidata Query Logs dataset, please cite our paper:
 
 ```bibtex
-@article{DBLP:journals/corr/abs-2602-14594,
+@inproceedings{DBLP:conf/sigir/WalterB26,
   author       = {Sebastian Walter and
                   Hannah Bast},
   title        = {The Wikidata Query Logs Dataset},
-  journal      = {CoRR},
-  volume       = {abs/2602.14594},
+  booktitle    = {{SIGIR}},
+  pages        = {3442--3447},
+  publisher    = {{ACM}},
   year         = {2026}
 }
 ```
